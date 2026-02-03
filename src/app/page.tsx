@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { Upload, FileText, CheckCircle, AlertTriangle, XCircle, Plus, Download, Trash2, Eye, Calendar, DollarSign, Moon, Sun, Settings, FileImage, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -839,7 +839,7 @@ export default function AkuitDashboard() {
               title={viewingDocument.name}
               issues={viewingDocument.issues.map(issue => ({
                 id: issue.id,
-                type: issue.type,
+                type: issue.type.toLowerCase() as 'critical' | 'warning' | 'info',
                 title: issue.title,
                 description: issue.description,
                 recommendation: issue.recommendation,

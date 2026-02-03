@@ -27,8 +27,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Component mounted on client
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
-    
+
     // Load theme from localStorage
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null
     if (stored) {
@@ -39,35 +40,39 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Apply theme whenever theme changes
   useEffect(() => {
     if (!mounted) return
-    
+
     const root = document.documentElement
     root.classList.remove('light', 'dark')
-    
+
     let resolved: 'light' | 'dark' = 'light'
-    
+
     if (theme === 'system') {
       resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
     } else {
       resolved = theme
     }
-    
+
     root.classList.add(resolved)
-    setActualTheme(() => resolved)
+    if (actualTheme !== resolved) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActualTheme(() => resolved)
+    }
   }, [theme, mounted])
 
   // Listen for system theme changes when using system theme
   useEffect(() => {
     if (theme !== 'system' || !mounted) return undefined
-    
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = (e: MediaQueryListEvent) => {
       const root = document.documentElement
       root.classList.remove('light', 'dark')
       const newTheme = e.matches ? 'dark' : 'light'
       root.classList.add(newTheme)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActualTheme(() => newTheme)
     }
-    
+
     mediaQuery.addEventListener('change', handler)
     return () => mediaQuery.removeEventListener('change', handler)
   }, [theme, mounted])

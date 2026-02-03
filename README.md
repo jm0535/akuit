@@ -35,22 +35,26 @@ Akuit is an open-source, AI-powered acquittal review and reporting system design
 ## 🏗 Technology Stack
 
 ### Core Framework
+
 - **⚡ Next.js 16** - React framework with App Router
 - **📘 TypeScript 5** - Type-safe development
 - **🎨 Tailwind CSS 4** - Utility-first styling
 - **🧩 shadcn/ui** - High-quality accessible components
 
 ### AI & Vision
+
 - **👁️ z-ai-web-dev-sdk** - Vision and language model integration
 - **🤖 Computer Vision** - Document text extraction and analysis
 - **🧠 AI Analysis** - Issue detection and recommendation generation
 
 ### Backend & Data
+
 - **🗄️ Prisma** - Type-safe database ORM
 - **🔐 SQLite** - Embedded database for easy deployment
 - **🔒 Crypto-JS** - AES-256 encryption for API keys
 
 ### UI/UX
+
 - **🎭 Framer Motion** - Smooth animations
 - **🌓 next-themes** - Theme management
 - **🎨 Lucide Icons** - Beautiful icon library
@@ -398,9 +402,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [x] API key management
 - [x] Dark/light theme
 - [x] Settings page
-- [ ] PDF export
-- [ ] Excel/CSV export
-- [ ] Document preview
+- [x] PDF export
+- [x] Excel/CSV export
+- [x] Document preview
 
 ### v1.5 (Planned)
 - [ ] User authentication

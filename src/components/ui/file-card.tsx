@@ -16,6 +16,8 @@ interface FileCardProps {
   onPreprocess?: (index: number, result: ProcessedImageResult) => void
   showQuality?: boolean
   showPreprocess?: boolean
+  quality?: ProcessedImageResult | null
+  docType?: DocumentType | null
   className?: string
 }
 

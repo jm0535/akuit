@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * Advanced Document Analysis API
  * Handles scanned documents, OCR extraction, and compliance checking
