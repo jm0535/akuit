@@ -24,8 +24,10 @@ function fileToBase64(buffer: Buffer, mimeType: string): string {
 // Analyze a single document using VLM
 async function analyzeDocument(imageBase64: string, fileName: string) {
   try {
-    const zai = await ZAI.create()
-    
+    const apiKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
+    if (!apiKey) throw new Error('Server configuration error: AI_API_KEY is missing')
+    const zai = await ZAI.create(apiKey)
+
     const analysisPrompt = `Analyze this financial document (receipt, invoice, or acquittal document). Extract and provide the following information in JSON format:
 
 {
@@ -72,7 +74,7 @@ Focus on accuracy for amounts, dates, and vendor information. If any field is no
     })
 
     const content = response.choices[0]?.message?.content || ''
-    
+
     // Try to parse JSON from the response
     let extractedData
     try {
@@ -104,8 +106,10 @@ Focus on accuracy for amounts, dates, and vendor information. If any field is no
 // Detect issues and generate recommendations using LLM
 async function detectIssuesAndRecommendations(extractedData: any, fileName: string) {
   try {
-    const zai = await ZAI.create()
-    
+    const apiKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
+    if (!apiKey) throw new Error('Server configuration error: AI_API_KEY is missing')
+    const zai = await ZAI.create(apiKey)
+
     const prompt = `You are an expert financial compliance auditor reviewing acquittal documents. Review the following extracted data from a document and identify any issues, compliance problems, or areas for improvement.
 
 Document: ${fileName}
@@ -152,7 +156,7 @@ Only include issues that are genuinely problematic. Be specific and actionable i
     })
 
     const content = response.choices[0]?.message?.content || ''
-    
+
     // Parse JSON response
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/)
@@ -182,10 +186,10 @@ Only include issues that are genuinely problematic. Be specific and actionable i
 export async function POST(request: NextRequest) {
   try {
     await ensureUploadDir()
-    
+
     const formData = await request.formData()
     const files = formData.getAll('files') as File[]
-    
+
     if (!files || files.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No files provided' },
@@ -210,18 +214,18 @@ export async function POST(request: NextRequest) {
     for (const file of files) {
       const bytes = await file.arrayBuffer()
       const buffer = Buffer.from(bytes)
-      
+
       // Save file to disk
       const fileName = `${Date.now()}-${file.name}`
       const filePath = join(UPLOAD_DIR, fileName)
       await writeFile(filePath, buffer)
-      
+
       const mimeType = file.type || 'image/jpeg'
       const imageBase64 = fileToBase64(buffer, mimeType)
-      
+
       // Analyze document using VLM
       const analysisResult = await analyzeDocument(imageBase64, file.name)
-      
+
       if (analysisResult.success) {
         // Save document to database
         await db.acquittalDocument.create({
@@ -234,13 +238,13 @@ export async function POST(request: NextRequest) {
             extractedData: JSON.stringify(analysisResult.extractedData)
           }
         })
-        
+
         // Detect issues using LLM
         const issuesResult = await detectIssuesAndRecommendations(
           analysisResult.extractedData,
           file.name
         )
-        
+
         // Add issues to database
         for (const issue of issuesResult.issues) {
           const dbIssue = await db.issue.create({
@@ -255,7 +259,7 @@ export async function POST(request: NextRequest) {
               resolved: false
             }
           })
-          
+
           allIssues.push({
             id: dbIssue.id,
             type: issue.type,
@@ -265,7 +269,7 @@ export async function POST(request: NextRequest) {
             confidence: issue.confidence || 0.8
           })
         }
-        
+
         if (issuesResult.totalAmount) {
           totalAmountSum += parseFloat(String(issuesResult.totalAmount))
         }
@@ -275,7 +279,7 @@ export async function POST(request: NextRequest) {
 
     // Update report with summary
     const avgConfidence = files.length > 0 ? confidenceSum / files.length : 0.0
-    
+
     await db.acquittalReport.update({
       where: { id: report.id },
       data: {
@@ -295,9 +299,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('API Error:', error)
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Internal server error' 
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error'
       },
       { status: 500 }
     )
