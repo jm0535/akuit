@@ -14,7 +14,7 @@ async function ensureUploadDir() {
   }
 }
 
-async function geminiFetch(apiKey: string, model: string, messages: any[], isVision: boolean) {
+async function geminiFetch(apiKey: string, model: string, messages: any[], isVision: boolean, retries = 3) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const contents = messages.map(msg => {
@@ -38,19 +38,32 @@ async function geminiFetch(apiKey: string, model: string, messages: any[], isVis
     return { role: msg.role === 'user' ? 'user' : 'model', parts }
   })
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents })
-  })
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents })
+      })
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(`Gemini API error: ${error.error?.message || response.statusText}`)
+      if (!response.ok) {
+        if (response.status === 429 && attempt < retries) {
+          // Exponential backoff: 2s, 4s, 8s...
+          const waitTime = Math.pow(2, attempt + 1) * 1000
+          console.warn(`Gemini API rate limited. Retrying in ${waitTime}ms... (Attempt ${attempt + 1}/${retries})`)
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+          continue
+        }
+        const error = await response.json()
+        throw new Error(`Gemini API error: ${error.error?.message || response.statusText}`)
+      }
+
+      const data = await response.json()
+      return data
+    } catch (error) {
+      if (attempt === retries) throw error
+    }
   }
-
-  const data = await response.json()
-  return data
 }
 
 function getApiKey(headerKey?: string | null): string {
