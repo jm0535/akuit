@@ -9,6 +9,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useToast } from '@/hooks/use-toast'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTheme } from '@/lib/theme-provider'
@@ -18,6 +24,8 @@ import { DocumentViewer } from '@/components/ui/document-viewer'
 import type { ProcessedImageResult, DocumentType } from '@/lib/document-processor'
 import { preprocessImage, detectDocumentType, getQualityColor, getQualityBadgeVariant } from '@/lib/document-processor'
 import { getActiveApiKey } from '@/lib/api-keys'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 type IssueType = 'CRITICAL' | 'WARNING' | 'INFO'
 type AnalysisStatus = 'idle' | 'uploading' | 'analyzing' | 'complete' | 'error'
@@ -217,6 +225,86 @@ export default function AkuitDashboard() {
     }
   }
 
+  const generatePDF = (report?: Report) => {
+    const doc = new jsPDF()
+
+    // Add Logo or Title
+    doc.setFontSize(20)
+    doc.text('Akuit Report', 14, 22)
+
+    doc.setFontSize(11)
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 30)
+
+    if (report) {
+      // Single Report Export
+      doc.setFontSize(16)
+      doc.text(report.name, 14, 45)
+
+      const issueData = report.issues.map(issue => [
+        issue.type,
+        issue.title,
+        issue.confidence + '%',
+        issue.recommendation
+      ])
+
+      autoTable(doc, {
+        startY: 50,
+        head: [['Type', 'Issue', 'Confidence', 'Recommendation']],
+        body: issueData,
+      })
+
+      doc.save(`akuit-report-${report.id}.pdf`)
+    } else {
+      // All Reports Export
+      const tableData = reports.map(r => [
+        r.name,
+        new Date(r.date).toLocaleDateString(),
+        r.status,
+        r.issues.length,
+        r.totalAmount ? '$' + r.totalAmount : '-'
+      ])
+
+      autoTable(doc, {
+        startY: 40,
+        head: [['Name', 'Date', 'Status', 'Issues', 'Amount']],
+        body: tableData,
+      })
+
+      doc.save('akuit-reports-summary.pdf')
+    }
+  }
+
+  const generateCSV = () => {
+    const headers = ['Name', 'Date', 'Status', 'Issues', 'Critical', 'Warning', 'Info', 'Amount']
+    const csvContent = [
+      headers.join(','),
+      ...reports.map(r => {
+        return [
+          `"${r.name}"`,
+          new Date(r.date).toLocaleDateString(),
+          r.status,
+          r.issues.length,
+          r.issues.filter(i => i.type === 'CRITICAL').length,
+          r.issues.filter(i => i.type === 'WARNING').length,
+          r.issues.filter(i => i.type === 'INFO').length,
+          r.totalAmount || 0
+        ].join(',')
+      })
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      link.setAttribute('download', 'akuit_reports_export.csv')
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
+  }
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
@@ -322,10 +410,22 @@ export default function AkuitDashboard() {
                   <Moon className="h-4 w-4" />
                 )}
               </Button>
-              <Button variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => generateCSV()}>
+                    Export as CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => generatePDF()}>
+                    Export as PDF (Summary)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button size="sm">
                 <Plus className="h-4 w-4 mr-2" />
                 New Report
@@ -501,9 +601,15 @@ export default function AkuitDashboard() {
                             Issues found and recommendations for {selectedReport.name}
                           </CardDescription>
                         </div>
-                        <Badge variant="secondary" className="ml-2">
-                          {Math.round(selectedReport.confidence * 100)}% Confidence
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => generatePDF(selectedReport)}>
+                            <Download className="h-4 w-4 mr-2" />
+                            Export PDF
+                          </Button>
+                          <Badge variant="secondary" className="ml-2">
+                            {Math.round(selectedReport.confidence * 100)}% Confidence
+                          </Badge>
+                        </div>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-4">

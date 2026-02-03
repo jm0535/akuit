@@ -23,6 +23,7 @@ export async function GET() {
       reports: reports.map(report => ({
         ...report,
         date: report.createdAt,
+        documentUrl: report.documents[0] ? `/api/akuit/documents/${report.documents[0].id}` : undefined,
         issues: report.issues.map(issue => ({
           id: issue.id,
           type: issue.type.toLowerCase() as 'critical' | 'warning' | 'info',
@@ -36,9 +37,9 @@ export async function GET() {
   } catch (error) {
     console.error('Failed to fetch reports:', error)
     return NextResponse.json(
-      { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to fetch reports' 
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch reports'
       },
       { status: 500 }
     )
