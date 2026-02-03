@@ -1,14 +1,13 @@
 'use client'
 
 import React, { useState, useCallback, useEffect } from 'react'
-import { Upload, FileText, CheckCircle, AlertTriangle, XCircle, Plus, Download, Trash2, Eye, Calendar, DollarSign, Moon, Sun, Settings, FileImage, Sparkles, X, ShieldCheck, ExternalLink } from 'lucide-react'
+import { Upload, FileText, CheckCircle, AlertTriangle, XCircle, Plus, Download, Trash2, Eye, Calendar, DollarSign, Moon, Sun, Settings, Sparkles, ShieldCheck, ArrowRight, BarChart3 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,9 +19,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useTheme } from '@/lib/theme-provider'
 import { useRouter } from 'next/navigation'
 import { FileCard } from '@/components/ui/file-card'
-import { DocumentViewer } from '@/components/ui/document-viewer'
 import type { ProcessedImageResult, DocumentType } from '@/lib/document-processor'
-import { preprocessImage, detectDocumentType, getQualityColor, getQualityBadgeVariant } from '@/lib/document-processor'
+import { preprocessImage, detectDocumentType } from '@/lib/document-processor'
 import { getActiveApiKey } from '@/lib/api-keys'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -42,14 +40,14 @@ interface Issue {
 interface Report {
   id: string
   name: string
-  date: Date | string
+  date: string
   status: 'PENDING' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
   issues: Issue[]
   totalAmount?: number
   confidence: number
   documentUrl?: string
-  quality?: ProcessedImageResult
-  docType?: DocumentType
+  documentType?: string
+  summary?: string
 }
 
 export default function AkuitDashboard() {
@@ -62,13 +60,11 @@ export default function AkuitDashboard() {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isLoadingReports, setIsLoadingReports] = useState(false)
-  const [viewingDocument, setViewingDocument] = useState<Report | null>(null)
   const [activeTab, setActiveTab] = useState('upload')
   const { toast } = useToast()
   const { theme, setTheme, actualTheme } = useTheme()
   const router = useRouter()
 
-  // Fetch reports on component mount
   useEffect(() => {
     fetchReports()
   }, [])
@@ -117,12 +113,11 @@ export default function AkuitDashboard() {
     setAnalysisStatus('uploading')
     setUploadProgress(0)
 
-    // Upload progress simulation
     const uploadInterval = setInterval(() => {
       setUploadProgress(prev => {
-        if (prev >= 100) {
+        if (prev >= 90) {
           clearInterval(uploadInterval)
-          return 100
+          return 90
         }
         return prev + 10
       })
@@ -132,15 +127,12 @@ export default function AkuitDashboard() {
       clearInterval(uploadInterval)
       setUploadProgress(100)
       setAnalysisStatus('analyzing')
-
-      // Simulate API call to backend
       processAnalysis()
-    }, 2500)
+    }, 2000)
   }
 
   const processAnalysis = async () => {
     try {
-      // Use new analyze-document API
       const formData = new FormData()
       files.forEach(file => {
         formData.append('files', file)
@@ -157,39 +149,30 @@ export default function AkuitDashboard() {
       })
 
       if (!response.ok) {
-        throw new Error('Analysis failed')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Analysis failed')
       }
 
       const result = await response.json()
 
       if (result.success) {
-        const newReport: Report = {
-          id: result.reportId,
-          name: result.extractedData?.documentType
-            ? `${result.extractedData.documentType} Report - ${new Date().toLocaleDateString()}`
-            : `Acquittal Report ${reports.length + 1}`,
-          date: new Date().toISOString(),
-          status: 'PENDING',
-          issues: result.issues || [],
-          totalAmount: result.totalAmount,
-          confidence: result.confidence || 0.85,
-        }
-
-        setReports(prev => [newReport, ...prev])
-        setSelectedReport(newReport)
         setFiles([])
         setFileQualities(new Map())
         setFileDocTypes(new Map())
         setAnalysisStatus('complete')
         setActiveTab('reports')
 
-        // Refresh reports list
-        fetchReports()
+        await fetchReports()
 
         toast({
           title: 'Analysis complete',
           description: `Found ${result.summary?.totalIssues || 0} issues (${result.summary?.criticalIssues || 0} critical)`,
         })
+
+        // Auto-reset status after a short delay
+        setTimeout(() => setAnalysisStatus('idle'), 3000)
+      } else {
+        throw new Error(result.error || 'Analysis failed')
       }
     } catch (error) {
       setAnalysisStatus('error')
@@ -198,16 +181,16 @@ export default function AkuitDashboard() {
         description: error instanceof Error ? error.message : 'There was an error analyzing your documents',
         variant: 'destructive',
       })
+      setTimeout(() => setAnalysisStatus('idle'), 3000)
     }
   }
 
-  const viewDocument = (report: Report) => {
-    setViewingDocument(report)
-  }
-
-  const formatDate = (date: Date | string): string => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date
-    return dateObj.toLocaleDateString()
+  const formatDate = (date: string): string => {
+    return new Date(date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
   }
 
   const fetchReports = async () => {
@@ -230,7 +213,6 @@ export default function AkuitDashboard() {
   const generatePDF = (report?: Report) => {
     const doc = new jsPDF()
 
-    // Add Logo or Title
     doc.setFontSize(20)
     doc.text('Akuit Report', 14, 22)
 
@@ -238,14 +220,13 @@ export default function AkuitDashboard() {
     doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 30)
 
     if (report) {
-      // Single Report Export
       doc.setFontSize(16)
       doc.text(report.name, 14, 45)
 
       const issueData = report.issues.map(issue => [
         issue.type,
         issue.title,
-        issue.confidence + '%',
+        Math.round(issue.confidence * 100) + '%',
         issue.recommendation
       ])
 
@@ -257,13 +238,12 @@ export default function AkuitDashboard() {
 
       doc.save(`akuit-report-${report.id}.pdf`)
     } else {
-      // All Reports Export
       const tableData = reports.map(r => [
         r.name,
-        new Date(r.date).toLocaleDateString(),
+        formatDate(r.date),
         r.status,
-        r.issues.length,
-        r.totalAmount ? '$' + r.totalAmount : '-'
+        String(r.issues.length),
+        r.totalAmount ? '$' + r.totalAmount.toLocaleString() : '-'
       ])
 
       autoTable(doc, {
@@ -274,16 +254,30 @@ export default function AkuitDashboard() {
 
       doc.save('akuit-reports-summary.pdf')
     }
+
+    toast({
+      title: 'PDF exported',
+      description: 'Your report has been downloaded.',
+    })
   }
 
   const generateCSV = () => {
+    if (reports.length === 0) {
+      toast({
+        title: 'No data to export',
+        description: 'Create some reports first before exporting.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     const headers = ['Name', 'Date', 'Status', 'Issues', 'Critical', 'Warning', 'Info', 'Amount']
     const csvContent = [
       headers.join(','),
       ...reports.map(r => {
         return [
           `"${r.name}"`,
-          new Date(r.date).toLocaleDateString(),
+          formatDate(r.date),
           r.status,
           r.issues.length,
           r.issues.filter(i => i.type === 'CRITICAL').length,
@@ -296,15 +290,19 @@ export default function AkuitDashboard() {
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob)
-      link.setAttribute('href', url)
-      link.setAttribute('download', 'akuit_reports_export.csv')
-      link.style.visibility = 'hidden'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-    }
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', 'akuit_reports_export.csv')
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    toast({
+      title: 'CSV exported',
+      description: 'Your data has been downloaded.',
+    })
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -347,6 +345,16 @@ export default function AkuitDashboard() {
 
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index))
+    setFileQualities(prev => {
+      const next = new Map(prev)
+      next.delete(index)
+      return next
+    })
+    setFileDocTypes(prev => {
+      const next = new Map(prev)
+      next.delete(index)
+      return next
+    })
   }
 
   const getIssueIcon = (type: IssueType) => {
@@ -360,7 +368,7 @@ export default function AkuitDashboard() {
     }
   }
 
-  const getIssueBadgeVariant = (type: IssueType) => {
+  const getIssueBadgeVariant = (type: IssueType): 'destructive' | 'default' | 'secondary' => {
     switch (type) {
       case 'CRITICAL':
         return 'destructive'
@@ -426,36 +434,40 @@ export default function AkuitDashboard() {
   const getStatusBadgeColor = (status: Report['status']) => {
     switch (status) {
       case 'PENDING':
-        return 'bg-warning text-warning-foreground'
+        return 'bg-warning/15 text-warning border border-warning/30'
       case 'REVIEWED':
-        return 'bg-info text-info-foreground'
+        return 'bg-info/15 text-info border border-info/30'
       case 'APPROVED':
-        return 'bg-success text-success-foreground'
+        return 'bg-success/15 text-success border border-success/30'
       case 'REJECTED':
-        return 'bg-destructive text-destructive-foreground'
+        return 'bg-destructive/15 text-destructive border border-destructive/30'
     }
   }
+
+  const totalCritical = reports.reduce((sum, r) => sum + r.issues.filter(i => i.type === 'CRITICAL').length, 0)
+  const totalWarnings = reports.reduce((sum, r) => sum + r.issues.filter(i => i.type === 'WARNING').length, 0)
+  const totalIssues = reports.reduce((sum, r) => sum + r.issues.length, 0)
 
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-                <FileText className="h-6 w-6 text-primary-foreground" />
+              <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center shadow-sm">
+                <ShieldCheck className="h-6 w-6 text-primary-foreground" />
               </div>
               <div>
                 <h1 className="text-xl font-bold tracking-tight">Akuit</h1>
                 <p className="text-xs text-muted-foreground">Acquittal Review & Reporting</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => router.push('/settings')} title="Settings">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" onClick={() => router.push('/settings')} title="Settings">
                 <Settings className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={() => {
+              <Button variant="ghost" size="icon" onClick={() => {
                 setTheme(actualTheme === 'dark' ? 'light' : 'dark')
               }} title="Toggle theme">
                 {actualTheme === 'dark' ? (
@@ -464,23 +476,29 @@ export default function AkuitDashboard() {
                   <Moon className="h-4 w-4" />
                 )}
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Download className="h-4 w-4 mr-2" />
-                    Export
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => generateCSV()}>
-                    Export as CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => generatePDF()}>
-                    Export as PDF (Summary)
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button size="sm">
+              {reports.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Download className="h-4 w-4 mr-2" />
+                      Export
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => generateCSV()}>
+                      Export as CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => generatePDF()}>
+                      Export as PDF (Summary)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <Button size="sm" onClick={() => {
+                setActiveTab('upload')
+                setFiles([])
+                setAnalysisStatus('idle')
+              }}>
                 <Plus className="h-4 w-4 mr-2" />
                 New Report
               </Button>
@@ -489,26 +507,40 @@ export default function AkuitDashboard() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
         <Tabs value={activeTab} onValueChange={(value) => {
           setActiveTab(value)
           if (value === 'reports') fetchReports()
         }} className="space-y-6">
           <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="upload">Upload & Analyze</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
+            <TabsTrigger value="upload" className="gap-2">
+              <Upload className="h-4 w-4" />
+              Upload & Analyze
+            </TabsTrigger>
+            <TabsTrigger value="reports" className="gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Reports
+              {reports.length > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
+                  {reports.length}
+                </Badge>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* Upload & Analyze Tab */}
           <TabsContent value="upload" className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-3">
-              {/* Upload Section */}
+              {/* Upload Section - spans 2 columns */}
               <div className="lg:col-span-2 space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Upload Documents</CardTitle>
+                    <CardTitle className="flex items-center gap-2">
+                      <Upload className="h-5 w-5" />
+                      Upload Documents
+                    </CardTitle>
                     <CardDescription>
-                      Upload your acquittal reports, receipts, and financial documents for analysis
+                      Upload acquittal reports, receipts, and financial documents for AI-powered compliance analysis
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -518,11 +550,11 @@ export default function AkuitDashboard() {
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       className={`
-                        relative border-2 border-dashed rounded-lg p-12
+                        relative border-2 border-dashed rounded-xl p-12
                         transition-all duration-200 ease-out
                         ${isDragOver
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
+                          ? 'border-primary bg-primary/5 scale-[1.01]'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/30'
                         }
                       `}
                     >
@@ -545,7 +577,7 @@ export default function AkuitDashboard() {
                             {isDragOver ? 'Drop files here' : 'Drag & drop documents here'}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            or click to browse • Supports images and PDFs
+                            or click to browse -- Supports images and PDFs
                           </p>
                         </div>
                       </div>
@@ -558,7 +590,7 @@ export default function AkuitDashboard() {
                           initial={{ opacity: 0, height: 0 }}
                           animate={{ opacity: 1, height: 'auto' }}
                           exit={{ opacity: 0, height: 0 }}
-                          className="space-y-2"
+                          className="space-y-3"
                         >
                           <div className="flex items-center justify-between text-sm">
                             <span className="font-medium">{files.length} file(s) selected</span>
@@ -585,8 +617,6 @@ export default function AkuitDashboard() {
                                 onPreprocess={preprocessFile}
                                 showQuality={true}
                                 showPreprocess={true}
-                                quality={fileQualities.get(index) || null}
-                                docType={fileDocTypes.get(index) || null}
                               />
                             ))}
                           </div>
@@ -596,23 +626,45 @@ export default function AkuitDashboard() {
 
                     {/* Progress Bar */}
                     {analysisStatus === 'uploading' && (
-                      <div className="space-y-2">
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="space-y-2"
+                      >
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Uploading files...</span>
                           <span className="font-medium">{uploadProgress}%</span>
                         </div>
                         <Progress value={uploadProgress} className="h-2" />
-                      </div>
+                      </motion.div>
                     )}
 
                     {analysisStatus === 'analyzing' && (
-                      <Alert>
-                        <div className="flex items-center gap-2">
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      <Alert className="border-primary/20 bg-primary/5">
+                        <div className="flex items-center gap-3">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                           <AlertDescription className="font-medium">
-                            Analyzing documents with AI...
+                            Analyzing documents with AI... This may take a moment.
                           </AlertDescription>
                         </div>
+                      </Alert>
+                    )}
+
+                    {analysisStatus === 'complete' && (
+                      <Alert className="border-success/20 bg-success/5">
+                        <CheckCircle className="h-4 w-4 text-success" />
+                        <AlertDescription className="font-medium text-success">
+                          Analysis complete! Check the Reports tab for results.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {analysisStatus === 'error' && (
+                      <Alert variant="destructive">
+                        <XCircle className="h-4 w-4" />
+                        <AlertDescription>
+                          Analysis failed. Please check your API key in Settings and try again.
+                        </AlertDescription>
                       </Alert>
                     )}
 
@@ -630,8 +682,8 @@ export default function AkuitDashboard() {
                         </>
                       ) : (
                         <>
-                          <CheckCircle className="h-4 w-4 mr-2" />
-                          Analyze Documents
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          Analyze {files.length > 0 ? `${files.length} Document${files.length > 1 ? 's' : ''}` : 'Documents'}
                         </>
                       )}
                     </Button>
@@ -639,286 +691,341 @@ export default function AkuitDashboard() {
                 </Card>
               </div>
 
-              {/* Analysis Results */}
-              {selectedReport && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  >
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle>Analysis Results</CardTitle>
-                          <CardDescription>
-                            Issues found and recommendations for {selectedReport.name}
-                          </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => generatePDF(selectedReport)}>
-                            <Download className="h-4 w-4 mr-2" />
-                            Export PDF
-                          </Button>
-                          <Badge variant="secondary" className="ml-2">
-                            {Math.round(selectedReport.confidence * 100)}% Confidence
-                          </Badge>
-                        </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {/* Summary Stats */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="p-4 bg-destructive/5 rounded-lg border border-destructive/20">
-                            <div className="text-2xl font-bold text-destructive">
-                              {selectedReport.issues.filter(i => i.type === 'CRITICAL').length}
-                            </div>
-                            <div className="text-xs text-muted-foreground">Critical Issues</div>
-                          </div>
-                          <div className="p-4 bg-warning/5 rounded-lg border-warning/20">
-                            <div className="text-2xl font-bold text-warning">
-                              {selectedReport.issues.filter(i => i.type === 'WARNING').length}
-                            </div>
-                            <div className="text-xs text-muted-foreground">Warnings</div>
-                          </div>
-                          <div className="p-4 bg-info/5 rounded-lg border-info/20">
-                            <div className="text-2xl font-bold text-info">
-                              {selectedReport.issues.filter(i => i.type === 'INFO').length}
-                            </div>
-                            <div className="text-xs text-muted-foreground">Suggestions</div>
-                          </div>
-                          {selectedReport.totalAmount && (
-                            <div className="p-4 bg-primary/5 rounded-lg border-primary/20">
-                              <div className="text-2xl font-bold text-primary">
-                                ${selectedReport.totalAmount.toLocaleString()}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Total Amount</div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Issues List */}
-                        <div className="space-y-3 max-h-96 overflow-y-auto scrollbar-thin">
-                          {selectedReport.issues.map((issue) => (
-                            <motion.div
-                              key={issue.id}
-                              initial={{ opacity: 0, x: -20 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              className="p-4 bg-muted/50 rounded-lg border border-border"
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="mt-0.5">{getIssueIcon(issue.type)}</div>
-                                <div className="flex-1 space-y-2">
-                                  <div>
-                                    <h4 className="font-semibold">{issue.title}</h4>
-                                    <Badge variant={getIssueBadgeVariant(issue.type)}>
-                                      {issue.type}
-                                    </Badge>
-                                    <Badge variant="outline" className="text-xs">
-                                      {Math.round(issue.confidence * 100)}% confidence
-                                    </Badge>
-                                  </div>
-                                  <p className="text-sm text-muted-foreground">
-                                    {issue.description}
-                                  </p>
-                                  <div className="p-3 bg-background rounded-md border border-border">
-                                    <p className="text-sm font-medium text-primary mb-1">Recommendation</p>
-                                    <p className="text-sm">{issue.recommendation}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            </motion.div>
-                          ))}
-                          {selectedReport.issues.length === 0 && (
-                            <div className="text-center py-8 text-muted-foreground">
-                              <CheckCircle className="h-12 w-12 mx-auto mb-3 text-success" />
-                              <p>No issues found. Great job!</p>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                )}
-
-              {/* Sidebar */}
+              {/* Sidebar - 1 column */}
               <div className="space-y-6">
                 {/* Quick Stats */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Overview</CardTitle>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Overview</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Total Reports</span>
-                        <span className="font-semibold">{reports.length}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Pending Review</span>
-                        <span className="font-semibold text-warning">
-                          {reports.filter(r => r.status === 'PENDING').length}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Approved</span>
-                        <span className="font-semibold text-success">
-                          {reports.filter(r => r.status === 'APPROVED').length}
-                        </span>
-                      </div>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Total Reports</span>
+                      <span className="font-semibold">{reports.length}</span>
                     </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Pending Review</span>
+                      <span className="font-semibold text-warning">
+                        {reports.filter(r => r.status === 'PENDING').length}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Total Issues</span>
+                      <span className="font-semibold">{totalIssues}</span>
+                    </div>
+                    {totalCritical > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Critical Issues</span>
+                        <span className="font-semibold text-destructive">{totalCritical}</span>
+                      </div>
+                    )}
+                    {reports.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-2"
+                        onClick={() => setActiveTab('reports')}
+                      >
+                        View All Reports
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
 
-                {/* Help Card */}
+                {/* How it works */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Need Help?</CardTitle>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">How it works</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2 text-sm text-muted-foreground">
-                    <p>• Upload receipts and invoices</p>
-                    <p>• AI analyzes for compliance</p>
-                    <p>• Get recommendations for fixes</p>
-                    <p>• Export detailed reports</p>
+                  <CardContent className="space-y-3 text-sm text-muted-foreground">
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary">1</div>
+                      <p>Upload receipts, invoices, or acquittal forms</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary">2</div>
+                      <p>AI extracts data and checks for compliance</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-xs font-bold text-primary">3</div>
+                      <p>Review findings and export detailed reports</p>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
             </div>
           </TabsContent>
 
-            {/* Reports Tab */}
-            <TabsContent value="reports" className="space-y-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <div>
-                    <CardTitle>All Reports</CardTitle>
-                    <CardDescription>
-                      View and manage your acquittal review reports
-                    </CardDescription>
-                  </div>
-                  {reports.length > 0 && (
-                    <Button variant="ghost" size="sm" onClick={clearAllReports} className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Clear All
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent>
-                    {isLoadingReports ? (
-                      <div className="space-y-4">
-                        {[1, 2, 3].map((i) => (
-                          <div key={i} className="p-4 bg-muted/50 rounded-lg border border border-border animate-pulse">
-                            <div className="flex items-center gap-3">
-                              <div className="w-5 h-5 bg-muted rounded animate-pulse" />
-                              <div className="flex-1">
-                                <div className="h-3 bg-muted rounded w-1/3 mb-2 animate-pulse" />
-                                <div className="h-3 bg-muted rounded w-1/3 animate-pulse" />
+          {/* Reports Tab */}
+          <TabsContent value="reports" className="space-y-6">
+            {/* Selected Report Detail Panel */}
+            <AnimatePresence>
+              {selectedReport && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <Card className="border-primary/20">
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <ShieldCheck className="h-5 w-5 text-primary" />
+                            {selectedReport.name}
+                          </CardTitle>
+                          <CardDescription className="flex items-center gap-3 mt-1">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {formatDate(selectedReport.date)}
+                            </span>
+                            {selectedReport.totalAmount && (
+                              <span className="flex items-center gap-1">
+                                <DollarSign className="h-3 w-3" />
+                                {selectedReport.totalAmount.toLocaleString()}
+                              </span>
+                            )}
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">
+                            {Math.round(selectedReport.confidence * 100)}% Confidence
+                          </Badge>
+                          <Button variant="outline" size="sm" onClick={() => generatePDF(selectedReport)}>
+                            <Download className="h-4 w-4 mr-2" />
+                            PDF
+                          </Button>
+                          <Button size="sm" onClick={() => router.push(`/reports/${selectedReport.id}`)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            Full Analysis
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setSelectedReport(null)}>
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="p-3 bg-destructive/5 rounded-lg border border-destructive/20">
+                          <div className="text-2xl font-bold text-destructive">
+                            {selectedReport.issues.filter(i => i.type === 'CRITICAL').length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Critical</div>
+                        </div>
+                        <div className="p-3 bg-warning/5 rounded-lg border border-warning/20">
+                          <div className="text-2xl font-bold text-warning">
+                            {selectedReport.issues.filter(i => i.type === 'WARNING').length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Warnings</div>
+                        </div>
+                        <div className="p-3 bg-info/5 rounded-lg border border-info/20">
+                          <div className="text-2xl font-bold text-info">
+                            {selectedReport.issues.filter(i => i.type === 'INFO').length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Suggestions</div>
+                        </div>
+                        {selectedReport.totalAmount != null && (
+                          <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                            <div className="text-2xl font-bold text-primary">
+                              ${selectedReport.totalAmount.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Total Amount</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Issues List */}
+                      <div className="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+                        {selectedReport.issues.map((issue) => (
+                          <div
+                            key={issue.id}
+                            className="p-3 bg-muted/50 rounded-lg border border-border"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="mt-0.5">{getIssueIcon(issue.type)}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <h4 className="font-medium text-sm">{issue.title}</h4>
+                                  <Badge variant={getIssueBadgeVariant(issue.type)} className="text-[10px]">
+                                    {issue.type}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {issue.description}
+                                </p>
+                                <div className="mt-2 p-2 bg-background rounded border border-border text-xs">
+                                  <span className="font-medium text-primary">Fix: </span>
+                                  {issue.recommendation}
+                                </div>
                               </div>
                             </div>
                           </div>
                         ))}
+                        {selectedReport.issues.length === 0 && (
+                          <div className="text-center py-6 text-muted-foreground">
+                            <CheckCircle className="h-10 w-10 mx-auto mb-2 text-success" />
+                            <p className="font-medium">No issues found</p>
+                            <p className="text-sm">This document passed all compliance checks.</p>
+                          </div>
+                        )}
                       </div>
-                    ) : reports.length === 0 ? (
-                      <div className="text-center py-12">
-                        <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <h3 className="text-lg font-semibold mb-2">No reports yet</h3>
-                        <p className="text-muted-foreground mb-4">
-                          Upload and analyze documents to create your first report
-                        </p>
-                        <Button onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))}>
-                          Go to Upload
-                        </Button>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Reports List */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+                <div>
+                  <CardTitle>All Reports</CardTitle>
+                  <CardDescription>
+                    View and manage your acquittal review reports
+                  </CardDescription>
+                </div>
+                {reports.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearAllReports} className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear All
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent>
+                {isLoadingReports ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="p-4 bg-muted/50 rounded-lg border border-border animate-pulse">
+                        <div className="flex items-center gap-3">
+                          <div className="w-5 h-5 bg-muted rounded" />
+                          <div className="flex-1">
+                            <div className="h-4 bg-muted rounded w-1/3 mb-2" />
+                            <div className="h-3 bg-muted rounded w-1/4" />
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="space-y-3 max-h-[600px] overflow-y-auto scrollbar-thin">
-                        {reports.map((report) => (
-                          <motion.div
-                            key={report.id}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="p-4 bg-muted/50 rounded-lg border border-border hover:border-primary/50 transition-colors cursor-pointer"
-                            onClick={() => setSelectedReport(report)}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <FileText className="h-5 w-5 text-muted-foreground" />
-                                  <h4 className="font-semibold">{report.name}</h4>
-                                  <Badge className={getStatusBadgeColor(report.status)}>
-                                    {report.status}
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                  <Calendar className="h-3 w-3" />
-                                  {formatDate(report.date)}
-                                </div>
-                                {report.totalAmount && (
-                                  <div className="flex items-center gap-1">
-                                    <DollarSign className="h-3 w-3" />
-                                    {report.totalAmount.toLocaleString()}
-                                  </div>
-                                )}
-                              </div>
+                    ))}
+                  </div>
+                ) : reports.length === 0 ? (
+                  <div className="text-center py-16">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                    <h3 className="text-lg font-semibold mb-2">No reports yet</h3>
+                    <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
+                      Upload and analyze documents to create your first compliance report.
+                    </p>
+                    <Button onClick={() => setActiveTab('upload')}>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Go to Upload
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto scrollbar-thin">
+                    {reports.map((report) => (
+                      <motion.div
+                        key={report.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`
+                          p-4 rounded-lg border transition-all cursor-pointer
+                          ${selectedReport?.id === report.id
+                            ? 'bg-primary/5 border-primary/30 shadow-sm'
+                            : 'bg-muted/50 border-border hover:border-primary/30 hover:bg-muted/80'
+                          }
+                        `}
+                        onClick={() => setSelectedReport(selectedReport?.id === report.id ? null : report)}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <h4 className="font-semibold text-sm truncate">{report.name}</h4>
+                              <Badge className={`text-[10px] ${getStatusBadgeColor(report.status)}`}>
+                                {report.status}
+                              </Badge>
                             </div>
-                            <div className="flex items-center gap-4">
-                              <Badge variant="destructive" className="text-xs">
-                                {report.issues.filter(i => i.type === 'CRITICAL').length} Critical
-                              </Badge>
-                              <Badge variant="default" className="text-xs">
-                                {report.issues.filter(i => i.type === 'WARNING').length} Warnings
-                              </Badge>
-                              <Badge variant="secondary" className="text-xs">
-                                {report.issues.filter(i => i.type === 'INFO').length} Suggestions
-                              </Badge>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  console.log('Opening full report:', report.id)
-                                  window.open(`/reports/${report.id}`, '_blank')
-                                }}
-                                className="ml-auto"
-                              >
-                                <ShieldCheck className="h-4 w-4 mr-2" />
-                                View Analysis
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  console.log('Deleting report:', report.id)
-                                  deleteReport(report.id)
-                                }}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {formatDate(report.date)}
+                              </span>
+                              {report.totalAmount != null && (
+                                <span className="flex items-center gap-1">
+                                  <DollarSign className="h-3 w-3" />
+                                  {report.totalAmount.toLocaleString()}
+                                </span>
+                              )}
+                              <span>{Math.round(report.confidence * 100)}% confidence</span>
                             </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-            </TabsContent>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {report.issues.filter(i => i.type === 'CRITICAL').length > 0 && (
+                                <Badge variant="destructive" className="text-[10px]">
+                                  {report.issues.filter(i => i.type === 'CRITICAL').length} Critical
+                                </Badge>
+                              )}
+                              {report.issues.filter(i => i.type === 'WARNING').length > 0 && (
+                                <Badge variant="default" className="text-[10px]">
+                                  {report.issues.filter(i => i.type === 'WARNING').length} Warnings
+                                </Badge>
+                              )}
+                              {report.issues.filter(i => i.type === 'INFO').length > 0 && (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {report.issues.filter(i => i.type === 'INFO').length} Suggestions
+                                </Badge>
+                              )}
+                              {report.issues.length === 0 && (
+                                <Badge variant="secondary" className="text-[10px] bg-success/10 text-success">
+                                  No Issues
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                router.push(`/reports/${report.id}`)
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteReport(report.id)
+                              }}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </main>
-
-      {/* Modal Dialog Removed as requested */}
-
 
       {/* Footer */}
       <footer className="border-t border-border bg-card/50 backdrop-blur-sm mt-auto">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-muted-foreground">
-              © 2025 Akuit. Premium enterprise acquittal review and reporting.
+              &copy; {new Date().getFullYear()} Akuit. Enterprise acquittal review and reporting.
             </div>
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
-              <a href="#" className="hover:text-foreground transition-colors">Terms</a>
-              <a href="#" className="hover:text-foreground transition-colors">Support</a>
+              <span className="hover:text-foreground transition-colors cursor-pointer" onClick={() => router.push('/settings')}>Settings</span>
             </div>
           </div>
         </div>

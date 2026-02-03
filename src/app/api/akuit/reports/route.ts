@@ -21,12 +21,18 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       reports: reports.map(report => ({
-        ...report,
-        date: report.createdAt,
+        id: report.id,
+        name: report.name,
+        status: report.status,
+        totalAmount: report.totalAmount,
+        confidence: report.confidence,
+        summary: report.summary,
+        date: report.createdAt.toISOString(),
         documentUrl: report.documents[0] ? `/api/akuit/documents/${report.documents[0].id}` : undefined,
+        documentType: report.documents[0]?.fileType || undefined,
         issues: report.issues.map(issue => ({
           id: issue.id,
-          type: issue.type.toLowerCase() as 'critical' | 'warning' | 'info',
+          type: issue.type,
           title: issue.title,
           description: issue.description,
           recommendation: issue.recommendation,
@@ -49,10 +55,8 @@ export async function GET() {
 // DELETE all reports
 export async function DELETE() {
   try {
-    // 1. Get all documents to delete files
     const documents = await db.acquittalDocument.findMany()
 
-    // 2. Delete physical files
     const { unlink } = await import('fs/promises')
     const { existsSync } = await import('fs')
 
@@ -66,7 +70,6 @@ export async function DELETE() {
       }
     }
 
-    // 3. Clear database (Triggers cascade on Issues and Documents)
     await db.acquittalReport.deleteMany()
 
     return NextResponse.json({
@@ -84,4 +87,3 @@ export async function DELETE() {
     )
   }
 }
-

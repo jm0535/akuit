@@ -21,20 +21,22 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
 
   const [apiKeys, setApiKeysState] = useState<ApiKey[]>([])
+  const [activeKeyId, setActiveKeyIdState] = useState<string | null>(null)
   const [showAddKey, setShowAddKey] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyValue, setNewKeyValue] = useState('')
-  const [selectedProvider, setSelectedProvider] = useState<ApiKey['provider']>('z-ai')
+  const [selectedProvider, setSelectedProvider] = useState<ApiKey['provider']>('google')
   const [showKey, setShowKey] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
 
-  // Load API keys function
   const loadApiKeys = async () => {
     const keys = await getApiKeys()
     setApiKeysState(keys)
+    if (typeof window !== 'undefined') {
+      setActiveKeyIdState(localStorage.getItem('akuit-active-key-id'))
+    }
   }
 
-  // Load API keys on mount
   useEffect(() => {
     loadApiKeys()
   }, [])
@@ -226,48 +228,63 @@ export default function SettingsPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {apiKeys.map((key) => (
-                      <motion.div
-                        key={key.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="p-4 bg-muted/50 rounded-lg border border-border"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Key className="h-4 w-4 text-muted-foreground" />
-                              <h4 className="font-semibold">{key.name}</h4>
-                              <Badge variant="outline">
-                                {key.provider}
-                              </Badge>
-                              {key.isValid !== undefined && (
-                                <Badge variant={key.isValid ? 'default' : 'destructive'}>
-                                  {key.isValid ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                                </Badge>
-                              )}
+                    {apiKeys.map((key) => {
+                      const isActive = activeKeyId === key.id
+                      return (
+                        <motion.div
+                          key={key.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`p-4 rounded-lg border ${isActive ? 'bg-primary/5 border-primary/30' : 'bg-muted/50 border-border'}`}
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <Key className="h-4 w-4 text-muted-foreground" />
+                                <h4 className="font-semibold">{key.name}</h4>
+                                <Badge variant="outline">{key.provider}</Badge>
+                                {isActive && (
+                                  <Badge className="bg-success/15 text-success border border-success/30 text-[10px]">
+                                    Active
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-sm text-muted-foreground space-y-1">
+                                <div className="font-mono bg-background p-2 rounded border border-border text-xs">
+                                  {maskApiKey(key.key)}
+                                </div>
+                                <div className="text-xs">
+                                  Created: {new Date(key.createdAt).toLocaleDateString()}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-sm text-muted-foreground space-y-1">
-                              <div className="font-mono bg-background p-2 rounded border border-border">
-                                {maskApiKey(key.key)}
-                              </div>
-                              <div className="text-xs">
-                                Created: {new Date(key.createdAt).toLocaleDateString()}
-                                {key.lastUsed && ` • Last used: ${new Date(key.lastUsed).toLocaleDateString()}`}
-                              </div>
+                            <div className="flex items-center gap-1">
+                              {!isActive && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    await setActiveApiKey(key.id)
+                                    setActiveKeyIdState(key.id)
+                                    toast({ title: 'Active key updated', description: `"${key.name}" is now the active API key.` })
+                                  }}
+                                >
+                                  Set Active
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteKey(key.id)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteKey(key.id)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </motion.div>
-                    ))}
+                        </motion.div>
+                      )
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -431,117 +448,21 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="space-y-1">
-                  <Label className="font-mono text-sm">ZAI_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Your Z.ai API key for production use
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">OPENAI_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    OpenAI API key for GPT models
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">ANTHROPIC_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Anthropic API key for Claude models
-                  </p>
-                </div>
-                <div className="space-y-1">
                   <Label className="font-mono text-sm">GOOGLE_API_KEY</Label>
                   <p className="text-xs text-muted-foreground">
-                    Google API key for Gemini models
+                    Google API key for Gemini models (primary, used for document analysis)
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="font-mono text-sm">COHERE_API_KEY</Label>
+                  <Label className="font-mono text-sm">AI_API_KEY</Label>
                   <p className="text-xs text-muted-foreground">
-                    Cohere API key
+                    Generic AI API key (fallback if GOOGLE_API_KEY is not set)
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="font-mono text-sm">HUGGINGFACE_API_KEY</Label>
+                  <Label className="font-mono text-sm">DATABASE_URL</Label>
                   <p className="text-xs text-muted-foreground">
-                    Hugging Face API key for transformers models
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">STABILITY_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Stability AI API key for image generation
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">REPLICATE_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Replicate API key for running AI models
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">TOGETHER_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Together AI API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">MISTRAL_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Mistral AI API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">XAI_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    xAI API key for Grok models
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">KIMI_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Kimi (Moonshot AI) API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">DEEPSEEK_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    DeepSeek API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">QWEN_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Qwen (Alibaba Cloud) API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">BAICHUAN_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Baichuan AI API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">YI_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Yi (01.AI) API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">INTERNLM_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    InternLM AI API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">ZHIPU_API_KEY</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Zhipu AI API key
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="font-mono text-sm">ZAI_API_ENDPOINT</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Custom API endpoint (optional)
+                    Database connection string (default: file:./db/dev.db)
                   </p>
                 </div>
                 <Alert>
@@ -561,7 +482,7 @@ export default function SettingsPage() {
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-sm text-muted-foreground">
-              © 2024 Akuit. Premium enterprise acquittal review and reporting.
+              &copy; {new Date().getFullYear()} Akuit. Enterprise acquittal review and reporting.
             </div>
           </div>
         </div>

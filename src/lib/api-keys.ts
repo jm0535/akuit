@@ -131,6 +131,7 @@ export function getEnvApiKey(): string | null {
 
 /**
  * Save API key to encrypted storage (client-side)
+ * Automatically sets as active if it's the first key
  */
 export async function saveApiKey(key: Omit<ApiKey, 'id' | 'createdAt'>): Promise<ApiKey> {
   const keys = await getApiKeys();
@@ -146,6 +147,12 @@ export async function saveApiKey(key: Omit<ApiKey, 'id' | 'createdAt'>): Promise
 
   const updatedKeys = [...keys, keyToStore];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedKeys));
+
+  // Auto-set as active if it's the first key or no active key exists
+  const currentActive = localStorage.getItem(ACTIVE_KEY_ID_KEY);
+  if (!currentActive || keys.length === 0) {
+    localStorage.setItem(ACTIVE_KEY_ID_KEY, newKey.id);
+  }
 
   return newKey;
 }
@@ -175,20 +182,29 @@ export async function getApiKeys(): Promise<ApiKey[]> {
  * Get active API key
  */
 export async function getActiveApiKey(): Promise<string | null> {
-  // Priority 1: Environment variables (server-side)
+  // Priority 1: Environment variables (server-side only)
   const envKey = getEnvApiKey();
   if (envKey) return envKey;
 
   // Priority 2: Active user-provided key (client-side)
   if (typeof window === 'undefined') return null;
 
-  const activeKeyId = localStorage.getItem(ACTIVE_KEY_ID_KEY);
-  if (!activeKeyId) return null;
-
   const keys = await getApiKeys();
-  const activeKey = keys.find(k => k.id === activeKeyId);
+  if (keys.length === 0) return null;
 
-  return activeKey?.key || null;
+  const activeKeyId = localStorage.getItem(ACTIVE_KEY_ID_KEY);
+  if (activeKeyId) {
+    const activeKey = keys.find(k => k.id === activeKeyId);
+    if (activeKey?.key) return activeKey.key;
+  }
+
+  // Fallback: use the first available key
+  if (keys[0]?.key) {
+    localStorage.setItem(ACTIVE_KEY_ID_KEY, keys[0].id);
+    return keys[0].key;
+  }
+
+  return null;
 }
 
 /**

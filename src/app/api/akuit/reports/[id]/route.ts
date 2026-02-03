@@ -14,23 +14,40 @@ export async function GET(
       where: { id: reportId },
       include: {
         documents: true,
-        issues: true
+        issues: {
+          orderBy: {
+            createdAt: 'desc'
+          }
+        }
       }
     })
 
     if (!report) {
-      return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+      return NextResponse.json({ success: false, error: 'Report not found' }, { status: 404 })
     }
 
     return NextResponse.json({
       success: true,
       report: {
-        ...report,
-        date: report.createdAt,
+        id: report.id,
+        name: report.name,
+        status: report.status,
+        totalAmount: report.totalAmount,
+        confidence: report.confidence,
+        summary: report.summary,
+        date: report.createdAt.toISOString(),
         documentUrl: report.documents[0] ? `/api/akuit/documents/${report.documents[0].id}` : undefined,
+        documentType: report.documents[0]?.fileType || undefined,
+        documents: report.documents.map(doc => ({
+          id: doc.id,
+          fileName: doc.fileName,
+          fileType: doc.fileType,
+          fileSize: doc.fileSize,
+          url: `/api/akuit/documents/${doc.id}`,
+        })),
         issues: report.issues.map(issue => ({
           id: issue.id,
-          type: issue.type.toLowerCase() as 'critical' | 'warning' | 'info',
+          type: issue.type,
           title: issue.title,
           description: issue.description,
           recommendation: issue.recommendation,
@@ -41,12 +58,11 @@ export async function GET(
   } catch (error) {
     console.error('Error fetching report:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     )
   }
 }
-
 
 export async function DELETE(
   request: NextRequest,
@@ -55,17 +71,15 @@ export async function DELETE(
   try {
     const { id: reportId } = await params
 
-    // 1. Find the report and its documents
     const report = await db.acquittalReport.findUnique({
       where: { id: reportId },
       include: { documents: true }
     })
 
     if (!report) {
-      return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+      return NextResponse.json({ success: false, error: 'Report not found' }, { status: 404 })
     }
 
-    // 2. Delete physical files
     for (const doc of report.documents) {
       if (existsSync(doc.filePath)) {
         try {
@@ -76,7 +90,6 @@ export async function DELETE(
       }
     }
 
-    // 3. Delete from database (Issues and Documents will be deleted via Cascade)
     await db.acquittalReport.delete({
       where: { id: reportId }
     })
@@ -88,7 +101,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Error deleting report:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     )
   }

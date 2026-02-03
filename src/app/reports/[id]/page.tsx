@@ -2,78 +2,111 @@
 
 import React, { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import {
-  FileText,
-  ArrowLeft,
-  Download,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Info,
-  Calendar,
-  DollarSign,
-  ShieldCheck,
-  ExternalLink
-} from 'lucide-react'
+import { ArrowLeft, Download, Calendar, DollarSign, ShieldCheck, AlertCircle, AlertTriangle, CheckCircle, Info, FileText, ExternalLink, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { DocumentViewer } from '@/components/ui/document-viewer'
-import { useToast } from '@/hooks/use-toast'
-import { motion } from 'framer-motion'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
+type IssueType = 'CRITICAL' | 'WARNING' | 'INFO'
+
 interface Issue {
   id: string
-  type: 'critical' | 'warning' | 'info'
+  type: IssueType
   title: string
   description: string
   recommendation: string
   confidence: number
 }
 
+interface Document {
+  id: string
+  fileName: string
+  fileType: string
+  fileSize: number
+  url: string
+}
+
 interface Report {
   id: string
   name: string
-  date: string
   status: string
-  issues: Issue[]
   totalAmount?: number
   confidence: number
-  documentUrl?: string
   summary?: string
+  date: string
+  documentUrl?: string
+  documentType?: string
+  documents?: Document[]
+  issues: Issue[]
 }
 
 export default function ReportDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const { toast } = useToast()
   const [report, setReport] = useState<Report | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedDocIndex, setSelectedDocIndex] = useState(0)
 
   useEffect(() => {
-    fetchReport()
+    async function fetchReport() {
+      setIsLoading(true)
+      setError(null)
+      try {
+        const response = await fetch(`/api/akuit/reports/${params.id}`)
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error('Report not found')
+          }
+          throw new Error('Failed to load report')
+        }
+        const data = await response.json()
+        if (data.success && data.report) {
+          setReport(data.report)
+        } else {
+          throw new Error(data.error || 'Failed to load report')
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load report')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    if (params.id) {
+      fetchReport()
+    }
   }, [params.id])
 
-  const fetchReport = async () => {
-    try {
-      const response = await fetch(`/api/akuit/reports/${params.id}`)
-      const data = await response.json()
-      if (data.success) {
-        setReport(data.report)
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to load report data',
-          variant: 'destructive'
-        })
-      }
-    } catch (error) {
-      console.error('Failed to fetch report:', error)
-    } finally {
-      setLoading(false)
+  const formatDate = (date: string): string => {
+    return new Date(date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const getIssueIcon = (type: IssueType) => {
+    switch (type) {
+      case 'CRITICAL':
+        return <AlertCircle className="h-5 w-5 text-destructive" />
+      case 'WARNING':
+        return <AlertTriangle className="h-5 w-5 text-warning" />
+      case 'INFO':
+        return <Info className="h-5 w-5 text-info" />
+    }
+  }
+
+  const getIssueBadgeVariant = (type: IssueType): 'destructive' | 'default' | 'secondary' => {
+    switch (type) {
+      case 'CRITICAL': return 'destructive'
+      case 'WARNING': return 'default'
+      case 'INFO': return 'secondary'
     }
   }
 
@@ -81,217 +114,275 @@ export default function ReportDetailPage() {
     if (!report) return
 
     const doc = new jsPDF()
-    doc.setFontSize(20)
-    doc.text('Akuit Compliance Report', 14, 22)
+
+    doc.setFontSize(22)
+    doc.text('Akuit Analysis Report', 14, 22)
 
     doc.setFontSize(11)
-    doc.text(`Report ID: ${report.id}`, 14, 30)
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 36)
+    doc.setTextColor(100, 100, 100)
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 30)
 
     doc.setFontSize(16)
-    doc.text(report.name, 14, 50)
+    doc.setTextColor(0, 0, 0)
+    doc.text(report.name, 14, 45)
 
-    const issueData = report.issues.map(issue => [
-      issue.type.toUpperCase(),
-      issue.title,
-      issue.confidence + '%',
-      issue.recommendation
-    ])
+    doc.setFontSize(10)
+    doc.setTextColor(100, 100, 100)
+    doc.text(`Date: ${formatDate(report.date)}`, 14, 52)
+    doc.text(`Status: ${report.status}`, 14, 58)
+    doc.text(`Confidence: ${Math.round(report.confidence * 100)}%`, 14, 64)
+    if (report.totalAmount) {
+      doc.text(`Total Amount: $${report.totalAmount.toLocaleString()}`, 14, 70)
+    }
 
-    autoTable(doc, {
-      startY: 55,
-      head: [['Type', 'Issue', 'Confidence', 'Recommendation']],
-      body: issueData,
-      theme: 'striped',
-      headStyles: { fillColor: [79, 70, 229] }
-    })
+    if (report.issues.length > 0) {
+      const issueData = report.issues.map((issue, i) => [
+        String(i + 1),
+        issue.type,
+        issue.title,
+        issue.description.substring(0, 80) + (issue.description.length > 80 ? '...' : ''),
+        issue.recommendation.substring(0, 80) + (issue.recommendation.length > 80 ? '...' : ''),
+        `${Math.round(issue.confidence * 100)}%`
+      ])
+
+      autoTable(doc, {
+        startY: report.totalAmount ? 78 : 72,
+        head: [['#', 'Type', 'Issue', 'Description', 'Recommendation', 'Confidence']],
+        body: issueData,
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [41, 37, 36] },
+        columnStyles: {
+          0: { cellWidth: 10 },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 30 },
+        }
+      })
+    }
 
     doc.save(`akuit-report-${report.id}.pdf`)
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground text-lg">Loading comprehensive analysis...</p>
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading report...</p>
         </div>
       </div>
     )
   }
 
-  if (!report) {
+  if (error || !report) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-        <XCircle className="h-16 w-16 text-destructive mb-4" />
-        <h1 className="text-2xl font-bold mb-2">Report Not Found</h1>
-        <p className="text-muted-foreground mb-6 text-center max-w-md">
-          The requested report could not be found. It may have been deleted or the link is invalid.
-        </p>
-        <Button onClick={() => router.push('/')}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Dashboard
-        </Button>
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="max-w-md w-full mx-4">
+          <CardContent className="pt-6 text-center">
+            <XCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
+            <h2 className="text-xl font-bold mb-2">Report Not Found</h2>
+            <p className="text-muted-foreground mb-6">
+              {error || 'The report you are looking for does not exist.'}
+            </p>
+            <Button onClick={() => router.push('/')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
-  return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Dashboard
-            </Button>
-            <div className="h-6 w-px bg-border mx-2" />
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              <h1 className="font-bold text-lg hidden md:block">{report.name}</h1>
-            </div>
-          </div>
+  const criticalCount = report.issues.filter(i => i.type === 'CRITICAL').length
+  const warningCount = report.issues.filter(i => i.type === 'WARNING').length
+  const infoCount = report.issues.filter(i => i.type === 'INFO').length
 
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 flex items-center gap-1.5 px-3 py-1">
-              <CheckCircle className="h-3.5 w-3.5" />
-              {report.status}
-            </Badge>
-            <Button size="sm" onClick={exportPDF}>
-              <Download className="h-4 w-4 mr-2" />
-              Export PDF
-            </Button>
+  const currentDoc = report.documents?.[selectedDocIndex]
+  const currentDocUrl = currentDoc?.url || report.documentUrl || ''
+  const currentDocType = currentDoc?.fileType || report.documentType || ''
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Dashboard
+              </Button>
+              <div className="hidden sm:block h-6 w-px bg-border" />
+              <div className="hidden sm:block">
+                <h1 className="text-sm font-semibold truncate max-w-[300px]">{report.name}</h1>
+                <p className="text-xs text-muted-foreground">{formatDate(report.date)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge
+                className={`text-xs ${
+                  report.status === 'APPROVED' ? 'bg-success/15 text-success border border-success/30' :
+                  report.status === 'REVIEWED' ? 'bg-info/15 text-info border border-info/30' :
+                  report.status === 'REJECTED' ? 'bg-destructive/15 text-destructive border border-destructive/30' :
+                  'bg-warning/15 text-warning border border-warning/30'
+                }`}
+              >
+                {report.status}
+              </Badge>
+              <Button variant="outline" size="sm" onClick={exportPDF}>
+                <Download className="h-4 w-4 mr-2" />
+                Export PDF
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Document Viewer - 2 columns */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Document tabs if multiple documents */}
+            {report.documents && report.documents.length > 1 && (
+              <Card className="p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-muted-foreground mr-2">Documents:</span>
+                  {report.documents.map((doc, i) => (
+                    <Button
+                      key={doc.id}
+                      variant={i === selectedDocIndex ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedDocIndex(i)}
+                    >
+                      <FileText className="h-3 w-3 mr-1" />
+                      {doc.fileName}
+                    </Button>
+                  ))}
+                </div>
+              </Card>
+            )}
 
-        {/* Left: Document Viewer (The "Report") */}
-        <section className="flex-1 overflow-hidden p-4 bg-muted/10 relative">
-          <div className="h-full rounded-xl overflow-hidden border border-border bg-card shadow-2xl">
             <DocumentViewer
-              imageUrl={report.documentUrl || ''}
-              title={report.name}
-              issues={report.issues.map(issue => ({
-                id: issue.id,
-                type: issue.type,
-                title: issue.title,
-                description: issue.description,
-                recommendation: issue.recommendation,
-                confidence: issue.confidence,
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100
-              }))}
+              documentUrl={currentDocUrl}
+              documentType={currentDocType}
+              title={currentDoc?.fileName || report.name}
+              issues={report.issues}
+              onDownload={currentDocUrl ? () => window.open(currentDocUrl, '_blank') : undefined}
             />
           </div>
-        </section>
 
-        {/* Right: Analysis Results Sidebar */}
-        <aside className="w-full lg:w-[400px] border-l border-border bg-card flex flex-col overflow-hidden">
-          <div className="p-6 border-b border-border bg-muted/30">
-            <h2 className="text-xl font-bold mb-1">Analysis Summary</h2>
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <Calendar className="h-3 w-3" />
-              Processed on {new Date(report.date).toLocaleString()}
-            </p>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
-            {/* Quick Metrics */}
-            <div className="grid grid-cols-2 gap-4">
-              <Card className="bg-muted/20 border-border/50">
-                <CardContent className="p-4 pt-4">
-                  <div className="text-2xl font-bold">{(report.confidence * 100).toFixed(0)}%</div>
-                  <div className="text-xs text-muted-foreground">Confidence</div>
-                  <Progress value={report.confidence * 100} className="h-1 mt-2" />
-                </CardContent>
-              </Card>
-              <Card className="bg-muted/20 border-border/50">
-                <CardContent className="p-4 pt-4">
-                  <div className="text-2xl font-bold flex items-center gap-1">
-                    <DollarSign className="h-5 w-5" />
-                    {report.totalAmount?.toLocaleString() || '-'}
+          {/* Analysis Sidebar - 1 column */}
+          <div className="space-y-6">
+            {/* Summary Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  Analysis Summary
+                </CardTitle>
+                {report.summary && (
+                  <CardDescription>{report.summary}</CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-destructive/5 rounded-lg border border-destructive/20 text-center">
+                    <div className="text-2xl font-bold text-destructive">{criticalCount}</div>
+                    <div className="text-xs text-muted-foreground">Critical</div>
                   </div>
-                  <div className="text-xs text-muted-foreground">Total Amount</div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Findings */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">Compliance Findings</h3>
-                <Badge variant="outline" className="text-[10px]">{report.issues.length} Issues</Badge>
-              </div>
-
-              {report.issues.length === 0 ? (
-                <div className="text-center py-8">
-                  <CheckCircle className="h-12 w-12 text-success mx-auto mb-2 opacity-20" />
-                  <p className="text-sm text-muted-foreground">No compliance issues detected.</p>
+                  <div className="p-3 bg-warning/5 rounded-lg border border-warning/20 text-center">
+                    <div className="text-2xl font-bold text-warning">{warningCount}</div>
+                    <div className="text-xs text-muted-foreground">Warnings</div>
+                  </div>
+                  <div className="p-3 bg-info/5 rounded-lg border border-info/20 text-center">
+                    <div className="text-2xl font-bold text-info">{infoCount}</div>
+                    <div className="text-xs text-muted-foreground">Suggestions</div>
+                  </div>
+                  <div className="p-3 bg-primary/5 rounded-lg border border-primary/20 text-center">
+                    <div className="text-2xl font-bold text-primary">
+                      {Math.round(report.confidence * 100)}%
+                    </div>
+                    <div className="text-xs text-muted-foreground">Confidence</div>
+                  </div>
                 </div>
-              ) : (
-                report.issues.map((issue, idx) => (
-                  <motion.div
-                    key={issue.id}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                  >
-                    <Card className={`border-l-4 overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-default ${
-                      issue.type === 'critical' ? 'border-l-destructive' :
-                      issue.type === 'warning' ? 'border-l-warning' :
-                      'border-l-info'
-                    }`}>
-                      <CardHeader className="p-4 pb-0">
-                        <div className="flex items-center gap-2">
-                          {issue.type === 'critical' ? <XCircle className="h-4 w-4 text-destructive" /> :
-                           issue.type === 'warning' ? <AlertTriangle className="h-4 w-4 text-warning" /> :
-                           <Info className="h-4 w-4 text-info" />}
-                          <CardTitle className="text-sm">{issue.title}</CardTitle>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-4 pt-2">
-                        <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                          {issue.description}
-                        </p>
-                        <div className="p-3 bg-muted/40 rounded-lg text-xs border border-border/50">
-                          <div className="font-semibold mb-1 flex items-center gap-1">
-                            <ShieldCheck className="h-3 w-3 text-primary" />
-                            Recommendation:
+
+                {report.totalAmount != null && (
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
+                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <DollarSign className="h-4 w-4" />
+                      Total Amount
+                    </span>
+                    <span className="font-bold">${report.totalAmount.toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border border-border">
+                  <span className="text-sm text-muted-foreground flex items-center gap-1">
+                    <Calendar className="h-4 w-4" />
+                    Date
+                  </span>
+                  <span className="font-medium text-sm">{formatDate(report.date)}</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Issues Detail Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  Issues ({report.issues.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {report.issues.length === 0 ? (
+                  <div className="text-center py-8">
+                    <CheckCircle className="h-10 w-10 mx-auto mb-2 text-success" />
+                    <p className="font-medium">No issues found</p>
+                    <p className="text-sm text-muted-foreground">
+                      This document passed all compliance checks.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto scrollbar-thin">
+                    {report.issues.map((issue, index) => (
+                      <div
+                        key={issue.id}
+                        className="p-3 bg-muted/50 rounded-lg border border-border"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-0.5 flex-shrink-0">
+                            {getIssueIcon(issue.type)}
                           </div>
-                          {issue.recommendation}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="font-medium text-sm">{issue.title}</span>
+                              <Badge variant={getIssueBadgeVariant(issue.type)} className="text-[10px]">
+                                {issue.type}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {issue.description}
+                            </p>
+                            <div className="p-2 bg-background rounded border border-border text-xs">
+                              <span className="font-medium text-primary">Fix: </span>
+                              {issue.recommendation}
+                            </div>
+                            <div className="flex items-center gap-2 mt-2">
+                              <span className="text-[10px] text-muted-foreground">
+                                Confidence: {Math.round(issue.confidence * 100)}%
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                ))
-              )}
-            </div>
-
-            {/* Organization Info */}
-            {report.summary && (
-              <div className="space-y-3">
-                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">Context</h3>
-                <div className="p-4 bg-primary/5 rounded-xl border border-primary/10 text-sm">
-                  {report.summary}
-                </div>
-              </div>
-            )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
-
-          <div className="p-6 border-t border-border bg-muted/10">
-            <Button variant="outline" className="w-full" onClick={() => window.open(report.documentUrl, '_blank')}>
-              <ExternalLink className="h-4 w-4 mr-2" />
-              Source Document
-            </Button>
-          </div>
-        </aside>
-      </main>
+        </div>
+      </div>
     </div>
   )
 }

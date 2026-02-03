@@ -8,17 +8,11 @@ export const dynamic = 'force-dynamic'
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'akuit')
 
-// Ensure upload directory exists
 async function ensureUploadDir() {
   if (!existsSync(UPLOAD_DIR)) {
     await mkdir(UPLOAD_DIR, { recursive: true })
   }
 }
-
-/**
- * Advanced Document Analysis API
- * Handles scanned documents, OCR extraction, and compliance checking
- */
 
 async function geminiFetch(apiKey: string, model: string, messages: any[], isVision: boolean) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
@@ -27,7 +21,6 @@ async function geminiFetch(apiKey: string, model: string, messages: any[], isVis
     if (typeof msg.content === 'string') {
       return { role: msg.role === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] }
     }
-    // Handle vision content
     const parts = msg.content.map((c: any) => {
       if (c.type === 'text') return { text: c.text }
       if (c.type === 'image_url') {
@@ -63,13 +56,22 @@ async function geminiFetch(apiKey: string, model: string, messages: any[], isVis
 function getApiKey(headerKey?: string | null): string {
   const key = headerKey || process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
   if (!key) {
-    throw new Error('Server configuration error: AI_API_KEY or GOOGLE_API_KEY is missing')
+    throw new Error('No API key configured. Set GOOGLE_API_KEY in your environment or add one in Settings.')
   }
   return key
 }
 
-function getModelFromKey(apiKey: string): string {
-  return 'gemini-2.0-flash' // Use 2.0 Flash for best compatibility and speed
+function getModelFromKey(): string {
+  return 'gemini-2.0-flash'
+}
+
+function severityScore(type: string): number {
+  switch (type?.toLowerCase()) {
+    case 'critical': return 0.9
+    case 'warning': return 0.6
+    case 'info': return 0.3
+    default: return 0.3
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
     await ensureUploadDir()
     const headerKey = request.headers.get('x-api-key')
     const apiKey = getApiKey(headerKey)
-    const model = getModelFromKey(apiKey)
+    const model = getModelFromKey()
 
     const formData = await request.formData()
     const files = formData.getAll('files') as File[]
@@ -89,21 +91,35 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Process first file
-    const file = files[0]
-    const fileData = await file.arrayBuffer()
-    const buffer = Buffer.from(fileData)
+    // Create report first
+    const report = await db.acquittalReport.create({
+      data: {
+        name: `Acquittal Report - ${new Date().toLocaleDateString()}`,
+        status: 'PENDING',
+        confidence: 0.0,
+      }
+    })
 
-    // Save file to disk
-    const fileName = `${Date.now()}-${file.name}`
-    const filePath = join(UPLOAD_DIR, fileName)
-    await writeFile(filePath, buffer)
+    let allIssues: any[] = []
+    let totalAmountSum = 0
+    let confidenceSum = 0
+    let reportName = ''
 
-    const base64Data = buffer.toString('base64')
-    const dataUrl = `data:${file.type};base64,${base64Data}`
+    // Process ALL uploaded files
+    for (const file of files) {
+      const fileData = await file.arrayBuffer()
+      const buffer = Buffer.from(fileData)
 
-    // Step 1: Extract text using VLM
-    const extractionPrompt = `You are an expert document analyzer for financial acquittal reports.
+      // Save file to disk
+      const fileName = `${Date.now()}-${file.name}`
+      const filePath = join(UPLOAD_DIR, fileName)
+      await writeFile(filePath, buffer)
+
+      const base64Data = buffer.toString('base64')
+      const dataUrl = `data:${file.type};base64,${base64Data}`
+
+      // Step 1: Extract text using VLM
+      const extractionPrompt = `You are an expert document analyzer for financial acquittal reports.
 
 Please analyze this document and extract:
 1. Document type (invoice, receipt, report, etc.)
@@ -132,47 +148,46 @@ Format as structured JSON:
 
 Only return valid JSON, no other text.`
 
-    let extractedData: any = {}
-    let extractedText = ''
+      let extractedData: any = {}
+      let extractedText = ''
 
-    try {
-      console.log('Starting Gemini document extraction...')
+      try {
+        const extractionResult = await geminiFetch(apiKey, model, [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: extractionPrompt },
+              { type: 'image_url', image_url: { url: dataUrl } }
+            ]
+          }
+        ], true)
 
-      const extractionResult = await geminiFetch(apiKey, model, [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: extractionPrompt },
-            { type: 'image_url', image_url: { url: dataUrl } }
-          ]
-        }
-      ], true)
+        const content = extractionResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
 
-      const content = extractionResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      console.log('Gemini raw content:', content)
-
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        try {
-          extractedData = JSON.parse(jsonMatch[0])
-          extractedText = extractedData.extractedText || content
-        } catch (e) {
-          console.error('JSON parse error:', e)
+        const jsonMatch = content.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          try {
+            extractedData = JSON.parse(jsonMatch[0])
+            extractedText = extractedData.extractedText || content
+          } catch {
+            extractedData = { documentType: 'Document', extractedText: content }
+            extractedText = content
+          }
+        } else {
           extractedData = { documentType: 'Document', extractedText: content }
           extractedText = content
         }
-      } else {
-        extractedData = { documentType: 'Document', extractedText: content }
-        extractedText = content
+      } catch (error) {
+        console.error('Gemini extraction failed:', error)
+        extractedData = { documentType: 'unknown', extractedText: '' }
       }
-      console.log('Gemini extraction successful')
-    } catch (error) {
-      console.error('Gemini extraction failed:', error)
-      extractedData = { documentType: 'unknown', extractedText: '' }
-    }
 
-    // Step 2: Compliance Analysis
-    const compliancePrompt = `You are a compliance expert specializing in financial acquittal reports and government funding.
+      if (!reportName && extractedData.documentType && extractedData.documentType !== 'unknown') {
+        reportName = `${extractedData.documentType} Report - ${new Date().toLocaleDateString()}`
+      }
+
+      // Step 2: Compliance Analysis
+      const compliancePrompt = `You are a compliance expert specializing in financial acquittal reports and government funding.
 
 Context: This is a BSCF (Blue Shield of California Foundation) project funds acquittal report requiring strict adherence to funding guidelines.
 
@@ -185,7 +200,7 @@ Return as JSON array:
 [
   {
     "id": "unique-id",
-    "type": "critical" | "warning" | "info",
+    "type": "CRITICAL" | "WARNING" | "INFO",
     "title": "short descriptive title",
     "description": "detailed explanation of the issue",
     "recommendation": "how to fix the issue",
@@ -198,93 +213,102 @@ Return as JSON array:
 ]
 
 Only return valid JSON array, no other text.`
-    let issues: any[] = []
 
-    try {
-      console.log('Starting Gemini compliance analysis...')
-      const analysisResult = await geminiFetch(apiKey, model, [
-        { role: 'user', content: compliancePrompt + "\n\nDocument Content:\n" + extractedText }
-      ], false)
+      let issues: any[] = []
 
-      const analysisContent = analysisResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      const jsonMatch = analysisContent.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        try {
-          issues = JSON.parse(jsonMatch[0])
-        } catch (e) {
-          console.error('Issues JSON parse error:', e)
+      try {
+        const analysisResult = await geminiFetch(apiKey, model, [
+          { role: 'user', content: compliancePrompt + "\n\nDocument Content:\n" + extractedText }
+        ], false)
+
+        const analysisContent = analysisResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        const issueJsonMatch = analysisContent.match(/\[[\s\S]*\]/)
+        if (issueJsonMatch) {
+          try {
+            issues = JSON.parse(issueJsonMatch[0])
+          } catch {
+            console.error('Issues JSON parse error')
+          }
         }
+      } catch (error) {
+        console.error('Gemini compliance analysis failed:', error)
       }
-      console.log(`Found ${issues.length} compliance issues`)
-    } catch (error) {
-      console.error('Gemini compliance analysis failed:', error)
-    }
 
-    // Step 3: Save to database
-    const totalAmount = extractedData.totalAmount || 0
-    const overallConfidence = calculateOverallConfidence(issues, extractedText)
-
-    // Create report
-    const report = await db.acquittalReport.create({
-      data: {
-        name: `${extractedData.documentType || 'Document'} Report - ${new Date().toLocaleDateString()}`,
-        status: 'REVIEWED',
-        totalAmount,
-        confidence: overallConfidence,
-        summary: extractedData.organization || 'Unknown Organization',
-      }
-    })
-
-    // Create document record
-    const documentRecord = await db.acquittalDocument.create({
-      data: {
-        reportId: report.id,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        filePath: filePath,
-        extractedData: JSON.stringify({
-          ...extractedData,
-          analysisTimestamp: new Date().toISOString()
-        })
-      }
-    })
-
-    // Create issues
-    for (const issue of issues) {
-      // Convert issue type to uppercase enum value
-      const issueType = (issue.type?.toUpperCase() || 'INFO') as 'CRITICAL' | 'WARNING' | 'INFO'
-
-      await db.issue.create({
+      // Save document record
+      await db.acquittalDocument.create({
         data: {
           reportId: report.id,
-          type: issueType,
-          title: issue.title,
-          description: issue.description,
-          recommendation: issue.recommendation,
-          confidence: issue.confidence > 1 ? issue.confidence / 100 : issue.confidence || 0.75,
-          severity: issueType,
-          resolved: false
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          filePath: filePath,
+          extractedData: JSON.stringify({
+            ...extractedData,
+            analysisTimestamp: new Date().toISOString()
+          })
         }
       })
+
+      // Create issue records with proper type normalization
+      for (const issue of issues) {
+        const rawType = (issue.type || 'INFO').toUpperCase()
+        const validTypes = ['CRITICAL', 'WARNING', 'INFO']
+        const normalizedType = validTypes.includes(rawType) ? rawType : 'INFO'
+
+        const dbIssue = await db.issue.create({
+          data: {
+            reportId: report.id,
+            type: normalizedType as 'CRITICAL' | 'WARNING' | 'INFO',
+            title: issue.title || 'Untitled Issue',
+            description: issue.description || 'No description provided',
+            recommendation: issue.recommendation || 'Review this item',
+            confidence: issue.confidence > 1 ? issue.confidence / 100 : issue.confidence || 0.75,
+            severity: severityScore(issue.type),
+            resolved: false
+          }
+        })
+
+        allIssues.push({
+          id: dbIssue.id,
+          type: normalizedType,
+          title: issue.title || 'Untitled Issue',
+          description: issue.description || 'No description provided',
+          recommendation: issue.recommendation || 'Review this item',
+          confidence: issue.confidence > 1 ? issue.confidence / 100 : issue.confidence || 0.75,
+        })
+      }
+
+      const docAmount = extractedData.totalAmount || 0
+      totalAmountSum += typeof docAmount === 'number' ? docAmount : parseFloat(String(docAmount)) || 0
+      confidenceSum += calculateDocConfidence(issues, extractedText)
     }
+
+    // Update report with final data
+    const overallConfidence = files.length > 0 ? Number((confidenceSum / files.length).toFixed(2)) : 0
+    const finalName = reportName || `Acquittal Report - ${new Date().toLocaleDateString()}`
+
+    await db.acquittalReport.update({
+      where: { id: report.id },
+      data: {
+        name: finalName,
+        status: 'REVIEWED',
+        totalAmount: totalAmountSum > 0 ? totalAmountSum : null,
+        confidence: overallConfidence,
+        summary: `Analyzed ${files.length} document(s). Found ${allIssues.length} compliance issue(s).`,
+      }
+    })
 
     return NextResponse.json({
       success: true,
       reportId: report.id,
-      documentId: documentRecord.id,
-      extractedData: {
-        ...extractedData,
-        issues
-      },
-      totalAmount,
+      totalAmount: totalAmountSum > 0 ? totalAmountSum : undefined,
       confidence: overallConfidence,
-      issues,
+      issues: allIssues,
       summary: {
-        totalIssues: issues.length,
-        criticalIssues: issues.filter((i: any) => i.type === 'critical').length,
-        warningIssues: issues.filter((i: any) => i.type === 'warning').length,
-        infoIssues: issues.filter((i: any) => i.type === 'info').length
+        totalIssues: allIssues.length,
+        criticalIssues: allIssues.filter((i: any) => i.type === 'CRITICAL').length,
+        warningIssues: allIssues.filter((i: any) => i.type === 'WARNING').length,
+        infoIssues: allIssues.filter((i: any) => i.type === 'INFO').length,
       }
     })
 
@@ -300,7 +324,7 @@ Only return valid JSON array, no other text.`
   }
 }
 
-function calculateOverallConfidence(issues: any[], extractedText: string): number {
+function calculateDocConfidence(issues: any[], extractedText: string): number {
   const textConfidence = extractedText.length > 50 ? 0.9 : 0.6
   const issueConfidence = issues.length > 0
     ? issues.reduce((sum: number, i: any) => sum + (i.confidence > 1 ? i.confidence / 100 : i.confidence || 0.75), 0) / issues.length

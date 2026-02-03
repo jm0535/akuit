@@ -1,60 +1,49 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { X, ZoomIn, ZoomOut, RotateCw, Maximize2, Download, AlertCircle, AlertTriangle, Info } from 'lucide-react'
 import { Button } from './button'
 import { Badge } from './badge'
 import { Card } from './card'
 import { cn } from '@/lib/utils'
-import type { ProcessedImageResult } from '@/lib/document-processor'
 
 interface IssueAnnotation {
   id: string
-  type: 'critical' | 'warning' | 'info'
+  type: 'CRITICAL' | 'WARNING' | 'INFO'
   title: string
-  x: number
-  y: number
-  width: number
-  height: number
   description: string
   recommendation: string
+  confidence: number
 }
 
 interface DocumentViewerProps {
-  imageUrl: string
+  documentUrl: string
+  documentType?: string
   title?: string
   issues?: IssueAnnotation[]
-  quality?: ProcessedImageResult
   onDownload?: () => void
   className?: string
 }
 
 export function DocumentViewer({
-  imageUrl,
+  documentUrl,
+  documentType,
   title,
   issues = [],
-  quality,
   onDownload,
   className
 }: DocumentViewerProps) {
   const [scale, setScale] = useState(1)
   const [rotation, setRotation] = useState(0)
   const [selectedIssue, setSelectedIssue] = useState<IssueAnnotation | null>(null)
-  const [showAnnotations, setShowAnnotations] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
 
   const viewerRef = useRef<HTMLDivElement>(null)
-  const imageRef = useRef<HTMLImageElement>(null)
 
-  const handleZoomIn = () => {
-    setScale(prev => Math.min(prev + 0.25, 4))
-  }
-
-  const handleZoomOut = () => {
-    setScale(prev => Math.max(prev - 0.25, 0.5))
-  }
+  const handleZoomIn = () => setScale(prev => Math.min(prev + 0.25, 4))
+  const handleZoomOut = () => setScale(prev => Math.max(prev - 0.25, 0.5))
 
   const handleReset = () => {
     setScale(1)
@@ -62,12 +51,10 @@ export function DocumentViewer({
     setPosition({ x: 0, y: 0 })
   }
 
-  const handleRotate = () => {
-    setRotation(prev => (prev + 90) % 360)
-  }
+  const handleRotate = () => setRotation(prev => (prev + 90) % 360)
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0) { // Left click only
+    if (e.button === 0) {
       setIsDragging(true)
       setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y })
     }
@@ -82,58 +69,39 @@ export function DocumentViewer({
     }
   }
 
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
+  const handleMouseUp = () => setIsDragging(false)
 
   const getIssueIcon = (type: IssueAnnotation['type']) => {
     switch (type) {
-      case 'critical':
+      case 'CRITICAL':
         return <AlertCircle className="h-4 w-4 text-destructive" />
-      case 'warning':
+      case 'WARNING':
         return <AlertTriangle className="h-4 w-4 text-warning" />
-      case 'info':
+      case 'INFO':
         return <Info className="h-4 w-4 text-info" />
     }
   }
 
-  const getIssueColor = (type: IssueAnnotation['type']) => {
+  const getIssueBadgeVariant = (type: IssueAnnotation['type']): 'destructive' | 'default' | 'secondary' => {
     switch (type) {
-      case 'critical':
-        return 'rgba(239, 68, 68, 0.3)' // Red
-      case 'warning':
-        return 'rgba(245, 158, 11, 0.3)' // Orange
-      case 'info':
-        return 'rgba(59, 130, 246, 0.3)' // Blue
+      case 'CRITICAL': return 'destructive'
+      case 'WARNING': return 'default'
+      case 'INFO': return 'secondary'
     }
   }
 
-  const getIssueBorderColor = (type: IssueAnnotation['type']) => {
-    switch (type) {
-      case 'critical':
-        return '#ef4444'
-      case 'warning':
-        return '#f59e0b'
-      case 'info':
-        return '#3b82f6'
-    }
-  }
+  // Determine if document should render as PDF iframe or image
+  const isPdf = documentType?.includes('pdf') ||
+    documentUrl?.toLowerCase().endsWith('.pdf') ||
+    documentUrl?.includes('application/pdf')
 
   return (
     <div className={cn('flex flex-col gap-4', className)}>
       {/* Toolbar */}
       <Card className="p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             {title && <h3 className="font-semibold text-lg">{title}</h3>}
-            {quality && (
-              <Badge
-                variant={quality.quality === 'excellent' ? 'default' : quality.quality === 'good' ? 'secondary' : 'outline'}
-                className="ml-2"
-              >
-                Quality: {quality.quality}
-              </Badge>
-            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -155,74 +123,54 @@ export function DocumentViewer({
                 <Download className="h-4 w-4" />
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowAnnotations(!showAnnotations)}
-            >
-              {showAnnotations ? 'Hide' : 'Show'} Annotations
-            </Button>
           </div>
         </div>
       </Card>
 
       {/* Document Viewer */}
-      <Card className="flex-1 relative overflow-hidden bg-muted/30">
-        <div
-          ref={viewerRef}
-          className="absolute inset-0 overflow-hidden cursor-grab active:cursor-grabbing"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          <div
-            className="absolute origin-top-left transition-transform duration-75"
-            style={{
-              transform: `translate(${position.x}px, ${position.y}px) rotate(${rotation}deg) scale(${scale})`
-            }}
-          >
-            {imageUrl && (imageUrl.toLowerCase().endsWith('.pdf') || imageUrl.includes('application/pdf') || imageUrl.includes('/api/akuit/documents/')) ? (
-              <iframe
-                src={imageUrl}
-                className="w-full h-[800px] border-0 rounded-lg shadow-inner bg-white"
-                title="Document Viewer"
-              />
-            ) : imageUrl ? (
-              <img
-                ref={imageRef}
-                src={imageUrl}
-                alt="Document"
-                className="max-w-none shadow-2xl"
-                draggable={false}
-              />
-            ) : null}
-
-            {/* Issue Annotations */}
-            {showAnnotations && issues.map((issue) => (
+      <Card className="relative overflow-hidden bg-muted/30" style={{ minHeight: '500px' }}>
+        {documentUrl ? (
+          isPdf ? (
+            <iframe
+              src={documentUrl}
+              className="w-full border-0 bg-white"
+              style={{ height: '600px' }}
+              title={title || 'Document Viewer'}
+            />
+          ) : (
+            <div
+              ref={viewerRef}
+              className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
+              style={{ minHeight: '500px' }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            >
               <div
-                key={issue.id}
-                className="absolute cursor-pointer group"
+                className="transition-transform duration-75 flex items-start justify-center p-4"
                 style={{
-                  left: issue.x,
-                  top: issue.y,
-                  width: issue.width,
-                  height: issue.height,
-                  backgroundColor: getIssueColor(issue.type),
-                  border: `2px solid ${getIssueBorderColor(issue.type)}`
+                  transform: `translate(${position.x}px, ${position.y}px) rotate(${rotation}deg) scale(${scale})`
                 }}
-                onClick={() => setSelectedIssue(issue)}
               >
-                {/* Issue marker */}
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="bg-background border border-border rounded-lg shadow-lg p-2">
-                    {getIssueIcon(issue.type)}
-                  </div>
-                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={documentUrl}
+                  alt={title || 'Document'}
+                  className="max-w-full shadow-2xl"
+                  draggable={false}
+                />
               </div>
-            ))}
+            </div>
+          )
+        ) : (
+          <div className="flex items-center justify-center h-full min-h-[400px] text-muted-foreground">
+            <div className="text-center">
+              <p className="font-medium">No document to display</p>
+              <p className="text-sm">Upload a document to view it here</p>
+            </div>
           </div>
-        </div>
+        )}
       </Card>
 
       {/* Issue Detail Panel */}
@@ -232,12 +180,11 @@ export function DocumentViewer({
             <div className="flex items-center gap-2">
               {getIssueIcon(selectedIssue.type)}
               <h3 className="font-semibold text-lg">{selectedIssue.title}</h3>
+              <Badge variant={getIssueBadgeVariant(selectedIssue.type)} className="text-xs">
+                {selectedIssue.type}
+              </Badge>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSelectedIssue(null)}
-            >
+            <Button variant="ghost" size="icon" onClick={() => setSelectedIssue(null)}>
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -250,76 +197,6 @@ export function DocumentViewer({
               <label className="text-sm font-medium text-muted-foreground">Recommendation</label>
               <p className="text-sm mt-1">{selectedIssue.recommendation}</p>
             </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Location</label>
-              <p className="text-sm mt-1">
-                Page {selectedIssue.x}, Section: {selectedIssue.y}
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Quality Details */}
-      {quality && (
-        <Card className="p-6">
-          <h3 className="font-semibold text-lg mb-4">Image Quality Analysis</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">Brightness</label>
-              <p className="text-lg font-semibold">{quality.details.brightness.toFixed(0)}</p>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${(quality.details.brightness / 255) * 100}%` }}
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">Contrast</label>
-              <p className="text-lg font-semibold">{quality.details.contrast.toFixed(0)}</p>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${Math.min(quality.details.contrast / 2.55, 100)}%` }}
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">Sharpness</label>
-              <p className="text-lg font-semibold">{quality.details.sharpness.toFixed(0)}</p>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${Math.min(quality.details.sharpness, 100)}%` }}
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">Confidence</label>
-              <p className="text-lg font-semibold">{quality.confidence}%</p>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${quality.confidence}%` }}
-                />
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 p-4 bg-muted/50 rounded-lg">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Overall Quality</span>
-              <Badge
-                variant={quality.quality === 'excellent' ? 'default' : quality.quality === 'good' ? 'secondary' : 'outline'}
-              >
-                {quality.quality}
-              </Badge>
-            </div>
-            {quality.details.isGrayscale && (
-              <p className="text-sm text-muted-foreground mt-2">
-                ℹ️ Document appears to be grayscale
-              </p>
-            )}
           </div>
         </Card>
       )}
@@ -327,24 +204,29 @@ export function DocumentViewer({
       {/* Issue Summary */}
       {issues.length > 0 && (
         <Card className="p-6">
-          <h3 className="font-semibold text-lg mb-4">Issues Found</h3>
+          <h3 className="font-semibold text-lg mb-4">Issues Found ({issues.length})</h3>
           <div className="space-y-3">
             {issues.map((issue, index) => (
               <div
                 key={issue.id}
-                className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer border border-border"
                 onClick={() => setSelectedIssue(issue)}
               >
                 <div className="mt-0.5">
                   {getIssueIcon(issue.type)}
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-sm">{issue.title}</p>
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-medium text-sm">{issue.title}</p>
+                    <Badge variant={getIssueBadgeVariant(issue.type)} className="text-[10px]">
+                      {issue.type}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">
                     {issue.description}
                   </p>
                 </div>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="text-xs flex-shrink-0">
                   #{index + 1}
                 </Badge>
               </div>
