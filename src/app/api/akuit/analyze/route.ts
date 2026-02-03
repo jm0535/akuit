@@ -7,7 +7,7 @@ import { db } from '@/lib/db'
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'akuit')
 
 async function geminiFetch(apiKey: string, model: string, contents: any[]) {
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const response = await fetch(url, {
     method: 'POST',
@@ -21,11 +21,7 @@ async function geminiFetch(apiKey: string, model: string, contents: any[]) {
   }
 
   const data = await response.json()
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-
-  return {
-    choices: [{ message: { content } }]
-  }
+  return data
 }
 
 function getApiKey(): string {
@@ -35,7 +31,7 @@ function getApiKey(): string {
 }
 
 function getModel(apiKey: string): string {
-  return apiKey.startsWith('AIza') ? 'gemini-1.5-flash' : 'gemini-1.5-flash'
+  return 'gemini-2.0-flash'
 }
 
 // Ensure upload directory exists
@@ -92,7 +88,7 @@ Focus on accuracy for amounts, dates, and vendor information. If any field is no
       ]
     }])
 
-    const content = response.choices[0]?.message?.content || ''
+    const content = response.candidates?.[0]?.content?.parts?.[0]?.text || ''
 
     // Try to parse JSON from the response
     let extractedData
@@ -163,7 +159,7 @@ Only include issues that are genuinely problematic. Be specific and actionable i
       parts: [{ text: prompt }]
     }])
 
-    const content = response.choices[0]?.message?.content || ''
+    const content = response.candidates?.[0]?.content?.parts?.[0]?.text || ''
 
     // Parse JSON response
     try {

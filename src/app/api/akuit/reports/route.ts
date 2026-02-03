@@ -45,3 +45,43 @@ export async function GET() {
     )
   }
 }
+
+// DELETE all reports
+export async function DELETE() {
+  try {
+    // 1. Get all documents to delete files
+    const documents = await db.acquittalDocument.findMany()
+
+    // 2. Delete physical files
+    const { unlink } = await import('fs/promises')
+    const { existsSync } = await import('fs')
+
+    for (const doc of documents) {
+      if (existsSync(doc.filePath)) {
+        try {
+          await unlink(doc.filePath)
+        } catch (e) {
+          console.error(`Failed to delete file: ${doc.filePath}`, e)
+        }
+      }
+    }
+
+    // 3. Clear database (Triggers cascade on Issues and Documents)
+    await db.acquittalReport.deleteMany()
+
+    return NextResponse.json({
+      success: true,
+      message: 'All reports and files cleared successfully'
+    })
+  } catch (error) {
+    console.error('Failed to clear reports:', error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to clear reports'
+      },
+      { status: 500 }
+    )
+  }
+}
+

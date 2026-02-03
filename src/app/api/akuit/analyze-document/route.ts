@@ -21,7 +21,7 @@ async function ensureUploadDir() {
  */
 
 async function geminiFetch(apiKey: string, model: string, messages: any[], isVision: boolean) {
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const contents = messages.map(msg => {
     if (typeof msg.content === 'string') {
@@ -57,11 +57,7 @@ async function geminiFetch(apiKey: string, model: string, messages: any[], isVis
   }
 
   const data = await response.json()
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-
-  return {
-    choices: [{ message: { content } }]
-  }
+  return data
 }
 
 function getApiKey(headerKey?: string | null): string {
@@ -73,7 +69,7 @@ function getApiKey(headerKey?: string | null): string {
 }
 
 function getModelFromKey(apiKey: string): string {
-  return apiKey.startsWith('AIza') ? 'gemini-1.5-flash' : 'gemini-1.5-flash' // Standardize on Flash for now
+  return 'gemini-2.0-flash' // Use 2.0 Flash for best compatibility and speed
 }
 
 export async function POST(request: NextRequest) {
@@ -152,13 +148,21 @@ Only return valid JSON, no other text.`
         }
       ], true)
 
-      const content = extractionResult.choices[0]?.message?.content || ''
+      const content = extractionResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      console.log('Gemini raw content:', content)
+
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
-        extractedData = JSON.parse(jsonMatch[0])
-        extractedText = extractedData.extractedText || content
+        try {
+          extractedData = JSON.parse(jsonMatch[0])
+          extractedText = extractedData.extractedText || content
+        } catch (e) {
+          console.error('JSON parse error:', e)
+          extractedData = { documentType: 'Document', extractedText: content }
+          extractedText = content
+        }
       } else {
-        extractedData = { documentType: 'unknown', extractedText: content }
+        extractedData = { documentType: 'Document', extractedText: content }
         extractedText = content
       }
       console.log('Gemini extraction successful')
@@ -202,10 +206,14 @@ Only return valid JSON array, no other text.`
         { role: 'user', content: compliancePrompt + "\n\nDocument Content:\n" + extractedText }
       ], false)
 
-      const analysisContent = analysisResult.choices[0]?.message?.content || ''
+      const analysisContent = analysisResult.candidates?.[0]?.content?.parts?.[0]?.text || ''
       const jsonMatch = analysisContent.match(/\[[\s\S]*\]/)
       if (jsonMatch) {
-        issues = JSON.parse(jsonMatch[0])
+        try {
+          issues = JSON.parse(jsonMatch[0])
+        } catch (e) {
+          console.error('Issues JSON parse error:', e)
+        }
       }
       console.log(`Found ${issues.length} compliance issues`)
     } catch (error) {
@@ -220,7 +228,7 @@ Only return valid JSON array, no other text.`
     const report = await db.acquittalReport.create({
       data: {
         name: `${extractedData.documentType || 'Document'} Report - ${new Date().toLocaleDateString()}`,
-        status: 'PENDING',
+        status: 'REVIEWED',
         totalAmount,
         confidence: overallConfidence,
         summary: extractedData.organization || 'Unknown Organization',

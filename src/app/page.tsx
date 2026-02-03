@@ -63,6 +63,7 @@ export default function AkuitDashboard() {
   const [isDragOver, setIsDragOver] = useState(false)
   const [isLoadingReports, setIsLoadingReports] = useState(false)
   const [viewingDocument, setViewingDocument] = useState<Report | null>(null)
+  const [activeTab, setActiveTab] = useState('upload')
   const { toast } = useToast()
   const { theme, setTheme, actualTheme } = useTheme()
   const router = useRouter()
@@ -180,6 +181,7 @@ export default function AkuitDashboard() {
         setFileQualities(new Map())
         setFileDocTypes(new Map())
         setAnalysisStatus('complete')
+        setActiveTab('reports')
 
         // Refresh reports list
         fetchReports()
@@ -369,6 +371,58 @@ export default function AkuitDashboard() {
     }
   }
 
+  const deleteReport = async (reportId: string) => {
+    if (!confirm('Are you sure you want to delete this report? This action cannot be undone.')) return
+
+    try {
+      const response = await fetch(`/api/akuit/reports/${reportId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        toast({
+          title: 'Report deleted',
+          description: 'The report and associated files have been removed.',
+        })
+        fetchReports()
+        if (selectedReport?.id === reportId) {
+          setSelectedReport(null)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete report:', error)
+      toast({
+        title: 'Delete failed',
+        description: 'Could not delete the report at this time.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const clearAllReports = async () => {
+    if (!confirm('This will PERMANENTLY delete ALL reports and files. Are you absolutely sure?')) return
+
+    try {
+      const response = await fetch('/api/akuit/reports', {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        toast({
+          title: 'All reports cleared',
+          description: 'Your reports tab is now empty.',
+        })
+        setReports([])
+        setSelectedReport(null)
+      }
+    } catch (error) {
+      console.error('Failed to clear reports:', error)
+      toast({
+        title: 'Reset failed',
+        description: 'Could not clear reports at this time.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const getStatusBadgeColor = (status: Report['status']) => {
     switch (status) {
       case 'PENDING':
@@ -436,11 +490,10 @@ export default function AkuitDashboard() {
       </header>
 
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs defaultValue="upload" className="space-y-6" onValueChange={(value) => {
-          if (value === 'reports') {
-            fetchReports()
-          }
-        }}>
+        <Tabs value={activeTab} onValueChange={(value) => {
+          setActiveTab(value)
+          if (value === 'reports') fetchReports()
+        }} className="space-y-6">
           <TabsList className="grid w-full max-w-md grid-cols-2">
             <TabsTrigger value="upload">Upload & Analyze</TabsTrigger>
             <TabsTrigger value="reports">Reports</TabsTrigger>
@@ -735,11 +788,19 @@ export default function AkuitDashboard() {
             {/* Reports Tab */}
             <TabsContent value="reports" className="space-y-6">
               <Card>
-                <CardHeader>
-                  <CardTitle>All Reports</CardTitle>
-                  <CardDescription>
-                    View and manage your acquittal review reports
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div>
+                    <CardTitle>All Reports</CardTitle>
+                    <CardDescription>
+                      View and manage your acquittal review reports
+                    </CardDescription>
+                  </div>
+                  {reports.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={clearAllReports} className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Clear All
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
                     {isLoadingReports ? (
@@ -811,10 +872,31 @@ export default function AkuitDashboard() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => viewDocument(report)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  console.log('Opening document:', report.documentUrl)
+                                  if (report.documentUrl) {
+                                    window.open(report.documentUrl, '_blank')
+                                  } else {
+                                    toast({ title: 'No document found' })
+                                  }
+                                }}
                                 className="ml-auto"
                               >
-                                <Eye className="h-3 w-3" />
+                                <Eye className="h-4 w-4 mr-2" />
+                                Open PDF
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  console.log('Deleting report:', report.id)
+                                  deleteReport(report.id)
+                                }}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </motion.div>
@@ -827,39 +909,8 @@ export default function AkuitDashboard() {
         </Tabs>
       </main>
 
-      {/* Document Viewer Dialog */}
-      <Dialog open={!!viewingDocument} onOpenChange={(open) => !open && setViewingDocument(null)}>
-        <DialogContent className="max-w-7xl max-h-[90vh]">
-          <DialogHeader>
-            <DialogTitle>{viewingDocument?.name || 'Document Viewer'}</DialogTitle>
-          </DialogHeader>
-          {viewingDocument && (
-            <DocumentViewer
-              imageUrl={viewingDocument.documentUrl || ''}
-              title={viewingDocument.name}
-              issues={viewingDocument.issues.map(issue => ({
-                id: issue.id,
-                type: issue.type.toLowerCase() as 'critical' | 'warning' | 'info',
-                title: issue.title,
-                description: issue.description,
-                recommendation: issue.recommendation,
-                confidence: issue.confidence,
-                x: 0,
-                y: 0,
-                width: 100,
-                height: 100
-              }))}
-              quality={viewingDocument.quality}
-              onDownload={() => {
-                toast({
-                  title: 'Download started',
-                  description: 'Downloading document...',
-                })
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Modal Dialog Removed as requested */}
+
 
       {/* Footer */}
       <footer className="border-t border-border bg-card/50 backdrop-blur-sm mt-auto">

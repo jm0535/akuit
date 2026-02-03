@@ -182,13 +182,21 @@ export function DocumentViewer({
               transform: `translate(${position.x}px, ${position.y}px) rotate(${rotation}deg) scale(${scale})`
             }}
           >
-            <img
-              ref={imageRef}
-              src={imageUrl}
-              alt="Document"
-              className="max-w-none shadow-2xl"
-              draggable={false}
-            />
+            {imageUrl && (imageUrl.toLowerCase().endsWith('.pdf') || imageUrl.includes('application/pdf') || imageUrl.includes('/api/akuit/documents/')) ? (
+              <iframe
+                src={imageUrl}
+                className="w-full h-[800px] border-0 rounded-lg shadow-inner bg-white"
+                title="Document Viewer"
+              />
+            ) : imageUrl ? (
+              <img
+                ref={imageRef}
+                src={imageUrl}
+                alt="Document"
+                className="max-w-none shadow-2xl"
+                draggable={false}
+              />
+            ) : null}
 
             {/* Issue Annotations */}
             {showAnnotations && issues.map((issue) => (
