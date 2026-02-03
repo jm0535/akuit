@@ -5,10 +5,10 @@ import { existsSync } from 'fs'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const documentId = params.id
+    const { id: documentId } = await params
 
     const document = await db.acquittalDocument.findUnique({
       where: { id: documentId }

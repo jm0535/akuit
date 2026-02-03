@@ -2,12 +2,41 @@ import { NextRequest, NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 
-// 'use server'
-
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'akuit')
+
+async function geminiFetch(apiKey: string, model: string, contents: any[]) {
+  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents })
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(`Gemini API error: ${error.error?.message || response.statusText}`)
+  }
+
+  const data = await response.json()
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+  return {
+    choices: [{ message: { content } }]
+  }
+}
+
+function getApiKey(): string {
+  const key = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
+  if (!key) throw new Error('Server configuration error: AI_API_KEY or GOOGLE_API_KEY is missing')
+  return key
+}
+
+function getModel(apiKey: string): string {
+  return apiKey.startsWith('AIza') ? 'gemini-1.5-flash' : 'gemini-1.5-flash'
+}
 
 // Ensure upload directory exists
 async function ensureUploadDir() {
@@ -24,9 +53,12 @@ function fileToBase64(buffer: Buffer, mimeType: string): string {
 // Analyze a single document using VLM
 async function analyzeDocument(imageBase64: string, fileName: string) {
   try {
-    const apiKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
-    if (!apiKey) throw new Error('Server configuration error: AI_API_KEY is missing')
-    const zai = await ZAI.create(apiKey)
+    const apiKey = getApiKey()
+    const model = getModel(apiKey)
+
+    // Extract base64 and mime type
+    const [mimePart, dataPart] = imageBase64.split(';base64,')
+    const mimeType = mimePart.replace('data:', '')
 
     const analysisPrompt = `Analyze this financial document (receipt, invoice, or acquittal document). Extract and provide the following information in JSON format:
 
@@ -52,33 +84,19 @@ async function analyzeDocument(imageBase64: string, fileName: string) {
 
 Focus on accuracy for amounts, dates, and vendor information. If any field is not present, use null.`
 
-    const response = await zai.chat.completions.createVision({
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: analysisPrompt
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: imageBase64
-              }
-            }
-          ]
-        }
-      ],
-      thinking: { type: 'disabled' }
-    })
+    const response = await geminiFetch(apiKey, model, [{
+      role: 'user',
+      parts: [
+        { text: analysisPrompt },
+        { inline_data: { mime_type: mimeType, data: dataPart } }
+      ]
+    }])
 
     const content = response.choices[0]?.message?.content || ''
 
     // Try to parse JSON from the response
     let extractedData
     try {
-      // Find JSON in the response
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         extractedData = JSON.parse(jsonMatch[0])
@@ -106,9 +124,8 @@ Focus on accuracy for amounts, dates, and vendor information. If any field is no
 // Detect issues and generate recommendations using LLM
 async function detectIssuesAndRecommendations(extractedData: any, fileName: string) {
   try {
-    const apiKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
-    if (!apiKey) throw new Error('Server configuration error: AI_API_KEY is missing')
-    const zai = await ZAI.create(apiKey)
+    const apiKey = getApiKey()
+    const model = getModel(apiKey)
 
     const prompt = `You are an expert financial compliance auditor reviewing acquittal documents. Review the following extracted data from a document and identify any issues, compliance problems, or areas for improvement.
 
@@ -141,19 +158,10 @@ Provide a JSON response with this exact structure:
 
 Only include issues that are genuinely problematic. Be specific and actionable in recommendations.`
 
-    const response = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'assistant',
-          content: 'You are an expert financial compliance auditor with years of experience in audit and compliance. You are thorough, professional, and precise.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      thinking: { type: 'disabled' }
-    })
+    const response = await geminiFetch(apiKey, model, [{
+      role: 'user',
+      parts: [{ text: prompt }]
+    }])
 
     const content = response.choices[0]?.message?.content || ''
 

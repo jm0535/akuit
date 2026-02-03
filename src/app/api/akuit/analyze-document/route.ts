@@ -1,45 +1,88 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { writeFile, mkdir } from 'fs/promises'
+import { join } from 'path'
+import { existsSync } from 'fs'
 
 export const dynamic = 'force-dynamic'
+
+const UPLOAD_DIR = join(process.cwd(), 'uploads', 'akuit')
+
+// Ensure upload directory exists
+async function ensureUploadDir() {
+  if (!existsSync(UPLOAD_DIR)) {
+    await mkdir(UPLOAD_DIR, { recursive: true })
+  }
+}
 
 /**
  * Advanced Document Analysis API
  * Handles scanned documents, OCR extraction, and compliance checking
  */
 
-let zaiInstance: any = null
+async function geminiFetch(apiKey: string, model: string, messages: any[], isVision: boolean) {
+  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`
 
-async function getZAI(apiKey?: string) {
-  if (apiKey) {
-    return await ZAI.create(apiKey)
-  }
-
-  // Fallback to env vars (AI or GOOGLE)
-  if (!zaiInstance) {
-    const envKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
-    if (!envKey) {
-      throw new Error('Server configuration error: AI_API_KEY or GOOGLE_API_KEY is missing')
+  const contents = messages.map(msg => {
+    if (typeof msg.content === 'string') {
+      return { role: msg.role === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] }
     }
-    zaiInstance = await ZAI.create(envKey)
+    // Handle vision content
+    const parts = msg.content.map((c: any) => {
+      if (c.type === 'text') return { text: c.text }
+      if (c.type === 'image_url') {
+        const [mime, data] = c.image_url.url.split(';base64,')
+        return {
+          inline_data: {
+            mime_type: mime.replace('data:', ''),
+            data: data
+          }
+        }
+      }
+      return null
+    }).filter(Boolean)
+
+    return { role: msg.role === 'user' ? 'user' : 'model', parts }
+  })
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents })
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(`Gemini API error: ${error.error?.message || response.statusText}`)
   }
-  return zaiInstance
+
+  const data = await response.json()
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+  return {
+    choices: [{ message: { content } }]
+  }
 }
 
-function getModelFromKey(apiKey?: string): string {
-  if (!apiKey) {
-    const envKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
-    return (envKey && envKey.startsWith('AIza')) ? 'gemini-1.5-pro' : 'glm-4.6v'
+function getApiKey(headerKey?: string | null): string {
+  const key = headerKey || process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
+  if (!key) {
+    throw new Error('Server configuration error: AI_API_KEY or GOOGLE_API_KEY is missing')
   }
-  return apiKey.startsWith('AIza') ? 'gemini-1.5-pro' : 'glm-4.6v'
+  return key
+}
+
+function getModelFromKey(apiKey: string): string {
+  return apiKey.startsWith('AIza') ? 'gemini-1.5-flash' : 'gemini-1.5-flash' // Standardize on Flash for now
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Try to get key from header first, then env
+    await ensureUploadDir()
     const headerKey = request.headers.get('x-api-key')
-    const zai = await getZAI(headerKey || undefined)
+    const apiKey = getApiKey(headerKey)
+    const model = getModelFromKey(apiKey)
+
     const formData = await request.formData()
     const files = formData.getAll('files') as File[]
 
@@ -50,15 +93,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Process first file (can extend for multiple)
+    // Process first file
     const file = files[0]
     const fileData = await file.arrayBuffer()
-    const base64Data = Buffer.from(fileData).toString('base64')
+    const buffer = Buffer.from(fileData)
+
+    // Save file to disk
+    const fileName = `${Date.now()}-${file.name}`
+    const filePath = join(UPLOAD_DIR, fileName)
+    await writeFile(filePath, buffer)
+
+    const base64Data = buffer.toString('base64')
     const dataUrl = `data:${file.type};base64,${base64Data}`
 
-    const model = getModelFromKey(headerKey)
-
-    // Step 1: Extract text using VLM (Vision Language Model)
+    // Step 1: Extract text using VLM
     const extractionPrompt = `You are an expert document analyzer for financial acquittal reports.
 
 Please analyze this document and extract:
@@ -92,59 +140,35 @@ Only return valid JSON, no other text.`
     let extractedText = ''
 
     try {
-      console.log('Starting VLM document extraction...')
+      console.log('Starting Gemini document extraction...')
 
-      const extractionResult = await zai.chat.completions.createVision({
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: extractionPrompt
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: dataUrl
-                }
-              }
-            ]
-          }
-        ],
-        model: model
-      })
+      const extractionResult = await geminiFetch(apiKey, model, [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: extractionPrompt },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]
+        }
+      ], true)
 
       const content = extractionResult.choices[0]?.message?.content || ''
-
-      // Extract JSON from response
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         extractedData = JSON.parse(jsonMatch[0])
         extractedText = extractedData.extractedText || content
       } else {
-        // Fallback: extract text without JSON parsing
-        extractedData = {
-          documentType: 'unknown',
-          extractedText: content
-        }
+        extractedData = { documentType: 'unknown', extractedText: content }
         extractedText = content
       }
-
-      console.log('VLM extraction successful')
+      console.log('Gemini extraction successful')
     } catch (error) {
-      console.error('VLM extraction failed:', error)
-      extractedData = {
-        documentType: 'unknown',
-        extractedText: ''
-      }
+      console.error('Gemini extraction failed:', error)
+      extractedData = { documentType: 'unknown', extractedText: '' }
     }
 
-    // Step 2: Compliance Analysis using LLM
+    // Step 2: Compliance Analysis
     const compliancePrompt = `You are a compliance expert specializing in financial acquittal reports and government funding.
-
-Analyze this document content for compliance issues:
-${extractedText || '(Document content will be here)'}
 
 Context: This is a BSCF (Blue Shield of California Foundation) project funds acquittal report requiring strict adherence to funding guidelines.
 
@@ -161,7 +185,7 @@ Return as JSON array:
     "title": "short descriptive title",
     "description": "detailed explanation of the issue",
     "recommendation": "how to fix the issue",
-    "confidence": 0-100,
+    "confidence": 0-1,
     "location": {
       "page": 1,
       "section": "description of where issue is found"
@@ -170,33 +194,22 @@ Return as JSON array:
 ]
 
 Only return valid JSON array, no other text.`
-
     let issues: any[] = []
 
     try {
-      console.log('Starting compliance analysis...')
-
-      const analysisResult = await zai.chat.completions.create({
-        messages: [
-          {
-            role: 'user',
-            content: compliancePrompt
-          }
-        ],
-        model: model
-      })
+      console.log('Starting Gemini compliance analysis...')
+      const analysisResult = await geminiFetch(apiKey, model, [
+        { role: 'user', content: compliancePrompt + "\n\nDocument Content:\n" + extractedText }
+      ], false)
 
       const analysisContent = analysisResult.choices[0]?.message?.content || ''
-
-      // Extract JSON from response
       const jsonMatch = analysisContent.match(/\[[\s\S]*\]/)
       if (jsonMatch) {
         issues = JSON.parse(jsonMatch[0])
       }
-
       console.log(`Found ${issues.length} compliance issues`)
     } catch (error) {
-      console.error('Compliance analysis failed:', error)
+      console.error('Gemini compliance analysis failed:', error)
     }
 
     // Step 3: Save to database
@@ -221,7 +234,7 @@ Only return valid JSON array, no other text.`
         fileName: file.name,
         fileType: file.type,
         fileSize: file.size,
-        filePath: '',
+        filePath: filePath,
         extractedData: JSON.stringify({
           ...extractedData,
           analysisTimestamp: new Date().toISOString()
@@ -241,7 +254,7 @@ Only return valid JSON array, no other text.`
           title: issue.title,
           description: issue.description,
           recommendation: issue.recommendation,
-          confidence: issue.confidence || 75,
+          confidence: issue.confidence > 1 ? issue.confidence / 100 : issue.confidence || 0.75,
           severity: issueType,
           resolved: false
         }
@@ -280,10 +293,10 @@ Only return valid JSON array, no other text.`
 }
 
 function calculateOverallConfidence(issues: any[], extractedText: string): number {
-  const textConfidence = extractedText.length > 50 ? 90 : 60
+  const textConfidence = extractedText.length > 50 ? 0.9 : 0.6
   const issueConfidence = issues.length > 0
-    ? issues.reduce((sum: number, i: any) => sum + (i.confidence || 75), 0) / issues.length
-    : 85
+    ? issues.reduce((sum: number, i: any) => sum + (i.confidence > 1 ? i.confidence / 100 : i.confidence || 0.75), 0) / issues.length
+    : 0.85
 
-  return Math.round((textConfidence * 0.6 + issueConfidence * 0.4))
+  return Number((textConfidence * 0.6 + issueConfidence * 0.4).toFixed(2))
 }
