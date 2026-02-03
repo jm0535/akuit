@@ -14,11 +14,11 @@ async function getZAI(apiKey?: string) {
     return await ZAI.create(apiKey)
   }
 
-  // Fallback to env vars (ZAI or GOOGLE)
+  // Fallback to env vars (AI or GOOGLE)
   if (!zaiInstance) {
-    const envKey = process.env.ZAI_API_KEY || process.env.GOOGLE_API_KEY
+    const envKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
     if (!envKey) {
-      throw new Error('Server configuration error: ZAI_API_KEY or GOOGLE_API_KEY is missing')
+      throw new Error('Server configuration error: AI_API_KEY or GOOGLE_API_KEY is missing')
     }
     zaiInstance = await ZAI.create(envKey)
   }
@@ -27,7 +27,7 @@ async function getZAI(apiKey?: string) {
 
 function getModelFromKey(apiKey?: string): string {
   if (!apiKey) {
-    const envKey = process.env.ZAI_API_KEY || process.env.GOOGLE_API_KEY
+    const envKey = process.env.AI_API_KEY || process.env.GOOGLE_API_KEY
     return (envKey && envKey.startsWith('AIza')) ? 'gemini-1.5-pro' : 'glm-4.6v'
   }
   return apiKey.startsWith('AIza') ? 'gemini-1.5-pro' : 'glm-4.6v'

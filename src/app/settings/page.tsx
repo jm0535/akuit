@@ -19,7 +19,7 @@ export default function SettingsPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { theme, setTheme } = useTheme()
-  
+
   const [apiKeys, setApiKeysState] = useState<ApiKey[]>([])
   const [showAddKey, setShowAddKey] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
@@ -50,7 +50,7 @@ export default function SettingsPage() {
     }
 
     setIsValidating(true)
-    
+
     // Validate key format
     if (!validateApiKey(newKeyValue, selectedProvider)) {
       setIsValidating(false)
@@ -68,17 +68,17 @@ export default function SettingsPage() {
         key: newKeyValue.trim(),
         provider: selectedProvider,
       })
-      
+
       toast({
         title: 'API key added',
         description: 'Your API key has been saved securely',
       })
-      
+
       // Reset form
       setNewKeyName('')
       setNewKeyValue('')
       setShowAddKey(false)
-      
+
       // Reload keys
       await loadApiKeys()
     } catch (error) {
@@ -88,7 +88,7 @@ export default function SettingsPage() {
         variant: 'destructive',
       })
     }
-    
+
     setIsValidating(false)
   }
 
@@ -116,7 +116,7 @@ export default function SettingsPage() {
   const getValidationMessage = (provider: ApiKey['provider']): string => {
     switch (provider) {
       case 'z-ai':
-        return 'Z.ai API keys should start with "zai_" or be at least 32 characters';
+        return 'API keys should be at least 32 characters';
       case 'openai':
         return 'OpenAI API keys should start with "sk-"';
       case 'anthropic':
@@ -298,7 +298,7 @@ export default function SettingsPage() {
                           onChange={(e) => setNewKeyName(e.target.value)}
                         />
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="provider">Provider</Label>
                         <select
@@ -328,7 +328,7 @@ export default function SettingsPage() {
                           <option value="custom">Custom</option>
                         </select>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="apiKey">API Key</Label>
                         <div className="flex gap-2">
@@ -555,7 +555,7 @@ export default function SettingsPage() {
           </TabsContent>
         </Tabs>
       </main>
-      
+
       {/* Footer */}
       <footer className="border-t border-border bg-card/50 backdrop-blur-sm mt-auto">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6">

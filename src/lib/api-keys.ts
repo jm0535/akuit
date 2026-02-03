@@ -1,9 +1,9 @@
 /**
  * API Key Management System
- * 
+ *
  * This module provides secure API key storage and retrieval for open-source projects.
  * Keys are stored with AES-256 encryption when using client-side storage.
- * 
+ *
  * Priority order for key resolution:
  * 1. Environment variables (production/server)
  * 2. Database (if user authenticated)
@@ -58,7 +58,7 @@ export function validateApiKey(key: string, provider: ApiKey['provider']): boole
 
   switch (provider) {
     case 'z-ai':
-      return key.startsWith('zai_') || key.length >= 32;
+      return key.length >= 32;
     case 'openai':
       return key.startsWith('sk-');
     case 'anthropic':
@@ -107,7 +107,7 @@ export function getEnvApiKey(): string | null {
   if (typeof window !== 'undefined') return null; // Only server-side
 
   return (
-    process.env.ZAI_API_KEY ||
+    process.env.AI_API_KEY ||
     process.env.OPENAI_API_KEY ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.GOOGLE_API_KEY ||
@@ -134,19 +134,19 @@ export function getEnvApiKey(): string | null {
  */
 export async function saveApiKey(key: Omit<ApiKey, 'id' | 'createdAt'>): Promise<ApiKey> {
   const keys = await getApiKeys();
-  
+
   const newKey: ApiKey = {
     ...key,
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
   };
-  
+
   const encryptedKey = encryptKey(key.key);
   const keyToStore = { ...newKey, key: encryptedKey };
-  
+
   const updatedKeys = [...keys, keyToStore];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedKeys));
-  
+
   return newKey;
 }
 
@@ -155,11 +155,11 @@ export async function saveApiKey(key: Omit<ApiKey, 'id' | 'createdAt'>): Promise
  */
 export async function getApiKeys(): Promise<ApiKey[]> {
   if (typeof window === 'undefined') return []; // Server-side
-  
+
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return [];
-    
+
     const keys = JSON.parse(stored);
     return keys.map((k: ApiKey) => ({
       ...k,
@@ -178,16 +178,16 @@ export async function getActiveApiKey(): Promise<string | null> {
   // Priority 1: Environment variables (server-side)
   const envKey = getEnvApiKey();
   if (envKey) return envKey;
-  
+
   // Priority 2: Active user-provided key (client-side)
   if (typeof window === 'undefined') return null;
-  
+
   const activeKeyId = localStorage.getItem(ACTIVE_KEY_ID_KEY);
   if (!activeKeyId) return null;
-  
+
   const keys = await getApiKeys();
   const activeKey = keys.find(k => k.id === activeKeyId);
-  
+
   return activeKey?.key || null;
 }
 
@@ -206,7 +206,7 @@ export async function deleteApiKey(keyId: string): Promise<void> {
   const keys = await getApiKeys()
   const updatedKeys = keys.filter(k => k.id !== keyId)
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedKeys.map(k => ({ ...k, key: encryptKey(k.key) }))))
-  
+
   // Clear active key if deleted
   const activeKeyId = localStorage.getItem(ACTIVE_KEY_ID_KEY);
   if (activeKeyId === keyId) {
@@ -220,12 +220,12 @@ export async function deleteApiKey(keyId: string): Promise<void> {
 export async function updateApiKey(keyId: string, updates: Partial<Omit<ApiKey, 'id' | 'createdAt'>>): Promise<void> {
   const keys = await getApiKeys();
   const keyIndex = keys.findIndex(k => k.id === keyId);
-  
+
   if (keyIndex === -1) throw new Error('Key not found');
-  
+
   const updatedKey = { ...keys[keyIndex], ...updates };
   keys[keyIndex] = updatedKey;
-  
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(keys.map(k => ({ ...k, key: encryptKey(k.key) }))));
 }
 
@@ -244,7 +244,7 @@ export async function clearApiKeys(): Promise<void> {
 export async function hasApiKeys(): Promise<boolean> {
   // Check environment variables
   if (getEnvApiKey()) return true;
-  
+
   // Check stored keys
   const keys = await getApiKeys();
   return keys.length > 0;
