@@ -4,7 +4,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 
 const prisma = new PrismaClient()
-const UPLOAD_DIR = join(process.cwd(), 'uploads', 'akuit')
+const UPLOAD_DIR = '/home/savi/workspace/projects/github/web_apps/app_tests/in4metrix/akuit/uploads/akuit'
 
 async function reset() {
   console.log('🚀 Starting Full System Reset...')
