@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useCallback, useEffect } from 'react'
-import { Upload, FileText, CheckCircle, AlertTriangle, XCircle, Plus, Download, Trash2, Eye, Calendar, DollarSign, Moon, Sun, Settings, FileImage, Sparkles, X } from 'lucide-react'
+import { Upload, FileText, CheckCircle, AlertTriangle, XCircle, Plus, Download, Trash2, Eye, Calendar, DollarSign, Moon, Sun, Settings, FileImage, Sparkles, X, ShieldCheck, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -874,17 +874,13 @@ export default function AkuitDashboard() {
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  console.log('Opening document:', report.documentUrl)
-                                  if (report.documentUrl) {
-                                    window.open(report.documentUrl, '_blank')
-                                  } else {
-                                    toast({ title: 'No document found' })
-                                  }
+                                  console.log('Opening full report:', report.id)
+                                  window.open(`/reports/${report.id}`, '_blank')
                                 }}
                                 className="ml-auto"
                               >
-                                <Eye className="h-4 w-4 mr-2" />
-                                Open PDF
+                                <ShieldCheck className="h-4 w-4 mr-2" />
+                                View Analysis
                               </Button>
                               <Button
                                 variant="ghost"
